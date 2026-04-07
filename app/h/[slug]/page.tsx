@@ -23,12 +23,8 @@ export default function HousePage({
 }) {
   const { slug } = use(params);
   const residents = houses[slug];
-  const [debugMessage, setDebugMessage] = useState("");
 
   async function createCall(resident: string) {
-    setDebugMessage(`button clicked: ${resident}`);
-    alert(`button clicked: ${resident}`);
-
     const { data, error } = await supabase
       .from("calls")
       .insert([
@@ -42,13 +38,11 @@ export default function HousePage({
       .single();
 
     if (error || !data) {
-      alert("Supabase insert failed");
-      alert(JSON.stringify(error));
       console.log(error);
       return;
     }
 
-    alert("row created");
+    
 
     window.location.href = `/h/${slug}/call/${resident}?callId=${data.id}`;
   }
@@ -68,9 +62,7 @@ export default function HousePage({
 
       <p className="text-gray-500">Who do you want to call?</p>
       
-      {debugMessage ? (
-  <p className="text-red-500 text-sm">{debugMessage}</p>
-) : null}
+      
       <div className="flex flex-col gap-4 w-full max-w-xs">
         {residents.map((resident) => (
           <button
