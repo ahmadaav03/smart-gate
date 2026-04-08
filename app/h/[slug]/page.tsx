@@ -23,8 +23,10 @@ export default function HousePage({
 }) {
   const { slug } = use(params);
   const residents = houses[slug];
+  const [loading, setLoading] = useState<string | null>(null);
 
   async function createCall(resident: string) {
+    setLoading(resident);
     const { data, error } = await supabase
       .from("calls")
       .insert([
@@ -66,17 +68,18 @@ export default function HousePage({
       <div className="flex flex-col gap-4 w-full max-w-xs">
         {residents.map((resident) => (
           <button
-            key={resident.slug}
-            type="button"
-            onClick={() => createCall(resident.slug)}
-            className={
-              resident.slug === "security"
-                ? "bg-gray-300 py-3 rounded-lg text-black"
-                : "bg-black text-white py-3 rounded-lg"
-            }
-          >
-            Call {resident.name}
-          </button>
+  key={resident.slug}
+  type="button"
+  onClick={() => createCall(resident.slug)}
+  disabled={loading === resident.slug}
+  className={
+    resident.slug === "security"
+      ? "bg-gray-300 py-3 rounded-lg text-black"
+      : "bg-black text-white py-3 rounded-lg"
+  }
+>
+  {loading === resident.slug ? "Calling..." : `Call ${resident.name}`}
+</button>
         ))}
       </div>
     </div>
