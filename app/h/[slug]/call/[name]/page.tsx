@@ -126,7 +126,8 @@ export default function CallPage({
             return;
           }
 
-          const existing = (data?.visitor_candidates as IceCandidateJSON[] | null) || [];
+          const existing =
+            (data?.visitor_candidates as IceCandidateJSON[] | null) || [];
           const alreadyExists = existing.some(
             (item) => JSON.stringify(item) === JSON.stringify(candidateData)
           );
@@ -176,7 +177,9 @@ export default function CallPage({
         if (!active) return;
 
         if (err?.name === "NotAllowedError") {
-          setError("Camera and microphone permission was denied.");
+          setError(
+            "Please allow camera and microphone access so the resident can see and speak to you."
+          );
         } else if (err?.name === "NotFoundError") {
           setError("No camera or microphone was found on this device.");
         } else {
@@ -314,18 +317,20 @@ export default function CallPage({
     stopEverything();
   }
 
+  const displayName = name.charAt(0).toUpperCase() + name.slice(1);
+
   if (status === "declined") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
         <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-lg text-center">
           <h1 className="text-2xl font-bold">Call Declined</h1>
           <p className="mt-3 text-gray-500">
-            {name.charAt(0).toUpperCase() + name.slice(1)} declined the call.
+            {displayName} declined the call.
           </p>
 
           <Link
             href={`/h/${slug}`}
-            className="mt-6 block w-full rounded-lg bg-black py-3 text-white font-medium"
+            className="mt-6 block w-full rounded-xl bg-black py-4 text-white font-semibold"
           >
             Back to House
           </Link>
@@ -343,7 +348,7 @@ export default function CallPage({
 
           <Link
             href={`/h/${slug}`}
-            className="mt-6 block w-full rounded-lg bg-black py-3 text-white font-medium"
+            className="mt-6 block w-full rounded-xl bg-black py-4 text-white font-semibold"
           >
             Back to House
           </Link>
@@ -365,15 +370,18 @@ export default function CallPage({
       <div className="absolute inset-0 bg-black/20" />
 
       <div className="absolute top-0 left-0 right-0 p-5 text-white">
-        <h1 className="text-2xl font-bold capitalize">Calling {name}...</h1>
+        <h1 className="text-2xl font-bold capitalize">
+          {status === "answered" ? "Call in progress" : `Calling ${displayName}`}
+        </h1>
+
         <p className="mt-1 text-sm text-white/90">
           {status === "answered"
-            ? "Connecting..."
-            : "Waiting for resident to answer"}
+            ? `You are connected to ${displayName}`
+            : `Waiting for ${displayName} to answer`}
         </p>
 
         {error ? (
-          <p className="mt-3 rounded-lg bg-red-600/90 px-3 py-2 text-sm">
+          <p className="mt-3 rounded-xl bg-red-600/90 px-3 py-3 text-sm">
             {error}
           </p>
         ) : null}
@@ -381,19 +389,23 @@ export default function CallPage({
 
       <div className="absolute bottom-0 left-0 right-0 p-5">
         <div className="mx-auto flex max-w-sm flex-col gap-3">
+          <div className="w-full rounded-full bg-yellow-500 py-4 text-center text-white font-semibold">
+            {status === "answered" ? "In Call" : "Ringing..."}
+          </div>
+
           <button
             type="button"
-            className="w-full rounded-full bg-yellow-500 py-4 text-white font-semibold"
+            onClick={cancelCall}
+            className="w-full rounded-full bg-red-600 py-4 text-white font-semibold"
           >
-            {status === "answered" ? "Connecting..." : "Waiting..."}
+            {status === "answered" ? "End Call" : "Cancel Call"}
           </button>
 
           <Link
             href={`/h/${slug}`}
-            onClick={cancelCall}
             className="w-full rounded-full bg-white py-4 text-center text-black font-semibold"
           >
-            Go Back
+            Back to House
           </Link>
         </div>
       </div>

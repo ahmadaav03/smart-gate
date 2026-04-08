@@ -3,6 +3,12 @@
 import { use, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
+type IceCandidateJSON = {
+  candidate: string;
+  sdpMid: string | null;
+  sdpMLineIndex: number | null;
+};
+
 type Call = {
   id: string;
   house_slug: string;
@@ -15,12 +21,6 @@ type Call = {
   resident_candidates?: IceCandidateJSON[] | null;
 };
 
-type IceCandidateJSON = {
-  candidate: string;
-  sdpMid: string | null;
-  sdpMLineIndex: number | null;
-};
-
 export default function ResidentPage({
   params,
 }: {
@@ -28,6 +28,7 @@ export default function ResidentPage({
 }) {
   const { name } = use(params);
   const residentSlug = name.toLowerCase();
+  const displayName = name.charAt(0).toUpperCase() + name.slice(1);
 
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -258,6 +259,26 @@ export default function ResidentPage({
     if (error) console.log(error);
   }
 
+  async function endCall() {
+    if (!incomingCall) return;
+
+    const { error } = await supabase
+      .from("calls")
+      .update({ status: "cancelled" })
+      .eq("id", incomingCall.id);
+
+    if (error) {
+      console.log(error);
+      return;
+    }
+
+    stopPeer();
+    setIncomingCall({
+      ...incomingCall,
+      status: "cancelled",
+    });
+  }
+
   async function clearCall() {
     if (!incomingCall) return;
 
@@ -279,7 +300,7 @@ export default function ResidentPage({
     <div className="min-h-screen bg-gray-100 px-4 py-6">
       <div className="mx-auto w-full max-w-md">
         <h1 className="mb-4 text-center text-2xl font-bold capitalize">
-          {name}&apos;s Phone
+          {displayName}&apos;s Phone
         </h1>
 
         <div className="overflow-hidden rounded-2xl bg-black shadow-lg">
@@ -300,37 +321,48 @@ export default function ResidentPage({
           <div className="mt-4 rounded-2xl bg-white p-6 shadow">
             <p className="text-center text-lg font-semibold">Incoming Call</p>
             <p className="mt-2 text-center text-gray-500">
-              Someone is calling from House {incomingCall.house_slug}
+              Visitor from House {incomingCall.house_slug} is waiting
             </p>
 
             <div className="mt-6 flex flex-col gap-3">
+              <div className="w-full rounded-xl bg-yellow-500 py-4 text-center text-white font-semibold">
+                Ringing...
+              </div>
+
               <button
                 onClick={() => updateCallStatus("answered")}
                 className="w-full rounded-xl bg-green-600 py-4 text-white font-semibold"
               >
-                Answer
+                Answer Call
               </button>
 
               <button
                 onClick={() => updateCallStatus("declined")}
                 className="w-full rounded-xl bg-red-600 py-4 text-white font-semibold"
               >
-                Decline
+                Decline Call
               </button>
             </div>
           </div>
         ) : incomingCall.status === "answered" ? (
           <div className="mt-4 rounded-2xl bg-white p-6 shadow">
             <p className="text-center text-lg font-semibold text-green-600">
-              Call Answered
+              Call in progress
+            </p>
+            <p className="mt-2 text-center text-gray-500">
+              You are connected to the visitor from House {incomingCall.house_slug}
             </p>
 
-            <div className="mt-6">
+            <div className="mt-6 flex flex-col gap-3">
+              <div className="w-full rounded-xl bg-green-600 py-4 text-center text-white font-semibold">
+                In Call
+              </div>
+
               <button
-                onClick={clearCall}
-                className="w-full rounded-xl bg-gray-300 py-4 text-black font-semibold"
+                onClick={endCall}
+                className="w-full rounded-xl bg-red-600 py-4 text-white font-semibold"
               >
-                End / Clear
+                End Call
               </button>
             </div>
           </div>
@@ -338,6 +370,9 @@ export default function ResidentPage({
           <div className="mt-4 rounded-2xl bg-white p-6 shadow">
             <p className="text-center text-lg font-semibold text-red-600">
               Call Declined
+            </p>
+            <p className="mt-2 text-center text-gray-500">
+              You declined the incoming call.
             </p>
 
             <div className="mt-6">
@@ -352,7 +387,10 @@ export default function ResidentPage({
         ) : (
           <div className="mt-4 rounded-2xl bg-white p-6 shadow">
             <p className="text-center text-lg font-semibold text-gray-700">
-              Call Cancelled
+              Call Ended
+            </p>
+            <p className="mt-2 text-center text-gray-500">
+              The call has been cancelled or ended.
             </p>
 
             <div className="mt-6">
