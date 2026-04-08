@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type Call = {
@@ -9,6 +9,16 @@ type Call = {
   resident_slug: string;
   status: "calling" | "answered" | "declined" | "cancelled";
   created_at: string;
+  offer?: RTCSessionDescriptionInit | null;
+  answer?: RTCSessionDescriptionInit | null;
+  visitor_candidates?: IceCandidateJSON[] | null;
+  resident_candidates?: IceCandidateJSON[] | null;
+};
+
+type IceCandidateJSON = {
+  candidate: string;
+  sdpMid: string | null;
+  sdpMLineIndex: number | null;
 };
 
 export default function ResidentPage({
@@ -20,6 +30,40 @@ export default function ResidentPage({
   const residentSlug = name.toLowerCase();
 
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const peerRef = useRef<RTCPeerConnection | null>(null);
+  const addedVisitorCandidatesRef = useRef<Set<string>>(new Set());
+
+  function stopPeer() {
+    if (peerRef.current) {
+      peerRef.current.close();
+      peerRef.current = null;
+    }
+
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+  }
+
+  async function addVisitorCandidates(
+    candidates: IceCandidateJSON[] | null | undefined
+  ) {
+    if (!peerRef.current || !candidates?.length) return;
+
+    for (const candidate of candidates) {
+      const key = JSON.stringify(candidate);
+
+      if (addedVisitorCandidatesRef.current.has(key)) continue;
+
+      try {
+        await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        addedVisitorCandidatesRef.current.add(key);
+        console.log("Resident added visitor ICE candidate:", candidate);
+      } catch (err) {
+        console.log("Resident failed to add visitor ICE candidate:", err);
+      }
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -58,6 +102,7 @@ export default function ResidentPage({
         (payload) => {
           if (payload.eventType === "DELETE") {
             setIncomingCall(null);
+            stopPeer();
             return;
           }
 
@@ -70,8 +115,137 @@ export default function ResidentPage({
     return () => {
       active = false;
       supabase.removeChannel(channel);
+      stopPeer();
     };
   }, [residentSlug]);
+
+  useEffect(() => {
+    async function prepareIncomingVideo() {
+      if (!incomingCall?.offer) return;
+      if (peerRef.current) return;
+
+      try {
+        console.log("Resident preparing incoming video");
+
+        const peer = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+
+        peerRef.current = peer;
+
+        peer.ontrack = async (event) => {
+          console.log("Resident received ontrack event", event);
+
+          const [remoteStream] = event.streams;
+
+          if (remoteVideoRef.current && remoteStream) {
+            console.log("Resident attaching remote stream", remoteStream);
+
+            remoteVideoRef.current.srcObject = remoteStream;
+
+            try {
+              await remoteVideoRef.current.play();
+              console.log("Resident video playback started");
+            } catch (playError) {
+              console.log("Resident video play() failed:", playError);
+            }
+          } else {
+            console.log("Resident ontrack fired, but no stream found");
+          }
+        };
+
+        peer.onicecandidate = async (event) => {
+          if (!event.candidate || !incomingCall?.id) return;
+
+          console.log("Resident ICE candidate:", event.candidate);
+
+          const candidateData: IceCandidateJSON = {
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          };
+
+          const { data, error } = await supabase
+            .from("calls")
+            .select("resident_candidates")
+            .eq("id", incomingCall.id)
+            .maybeSingle();
+
+          if (error) {
+            console.log("Failed to load resident candidates:", error);
+            return;
+          }
+
+          const existing =
+            (data?.resident_candidates as IceCandidateJSON[] | null) || [];
+          const alreadyExists = existing.some(
+            (item) => JSON.stringify(item) === JSON.stringify(candidateData)
+          );
+
+          if (alreadyExists) return;
+
+          const { error: updateError } = await supabase
+            .from("calls")
+            .update({
+              resident_candidates: [...existing, candidateData],
+            })
+            .eq("id", incomingCall.id);
+
+          if (updateError) {
+            console.log("Failed to save resident ICE candidate:", updateError);
+          }
+        };
+
+        peer.onconnectionstatechange = () => {
+          console.log("Resident connection state:", peer.connectionState);
+        };
+
+        peer.oniceconnectionstatechange = () => {
+          console.log("Resident ICE connection state:", peer.iceConnectionState);
+        };
+
+        await peer.setRemoteDescription(
+          new RTCSessionDescription(incomingCall.offer)
+        );
+
+        console.log("Resident applied remote offer");
+
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+
+        console.log("Resident created answer:", answer);
+
+        const { error } = await supabase
+          .from("calls")
+          .update({
+            answer: answer,
+          })
+          .eq("id", incomingCall.id);
+
+        if (error) {
+          console.log("Failed to save answer:", error);
+        } else {
+          console.log("Resident saved answer successfully");
+        }
+
+        await addVisitorCandidates(incomingCall.visitor_candidates || []);
+      } catch (err) {
+        console.log("Failed to prepare resident peer:", err);
+      }
+    }
+
+    prepareIncomingVideo();
+  }, [incomingCall]);
+
+  useEffect(() => {
+    async function syncVisitorCandidates() {
+      if (!incomingCall?.id || !peerRef.current) return;
+
+      await addVisitorCandidates(incomingCall.visitor_candidates || []);
+    }
+
+    syncVisitorCandidates();
+  }, [incomingCall?.visitor_candidates, incomingCall?.id]);
 
   async function updateCallStatus(newStatus: "answered" | "declined") {
     if (!incomingCall) return;
@@ -92,75 +266,103 @@ export default function ResidentPage({
       .delete()
       .eq("id", incomingCall.id);
 
-    if (error) console.log(error);
+    if (error) {
+      console.log(error);
+      return;
+    }
 
+    stopPeer();
     setIncomingCall(null);
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-lg text-center">
-        <h1 className="text-2xl font-bold capitalize">{name}&apos;s Phone</h1>
+    <div className="min-h-screen bg-gray-100 px-4 py-6">
+      <div className="mx-auto w-full max-w-md">
+        <h1 className="mb-4 text-center text-2xl font-bold capitalize">
+          {name}&apos;s Phone
+        </h1>
+
+        <div className="overflow-hidden rounded-2xl bg-black shadow-lg">
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            muted
+            playsInline
+            className="h-[420px] w-full object-cover"
+          />
+        </div>
 
         {!incomingCall ? (
-          <p className="mt-4 text-gray-500">No incoming calls</p>
+          <div className="mt-4 rounded-2xl bg-white p-6 text-center shadow">
+            <p className="text-gray-500">No incoming calls</p>
+          </div>
         ) : incomingCall.status === "calling" ? (
-          <div className="mt-6 flex flex-col gap-4">
-            <p className="text-lg font-semibold">Incoming Call</p>
-            <p className="text-gray-500">
+          <div className="mt-4 rounded-2xl bg-white p-6 shadow">
+            <p className="text-center text-lg font-semibold">Incoming Call</p>
+            <p className="mt-2 text-center text-gray-500">
               Someone is calling from House {incomingCall.house_slug}
             </p>
 
-            <button
-              onClick={() => updateCallStatus("answered")}
-              className="w-full rounded-lg bg-green-600 py-3 text-white font-medium"
-            >
-              Answer
-            </button>
+            <div className="mt-6 flex flex-col gap-3">
+              <button
+                onClick={() => updateCallStatus("answered")}
+                className="w-full rounded-xl bg-green-600 py-4 text-white font-semibold"
+              >
+                Answer
+              </button>
 
-            <button
-              onClick={() => updateCallStatus("declined")}
-              className="w-full rounded-lg bg-red-600 py-3 text-white font-medium"
-            >
-              Decline
-            </button>
+              <button
+                onClick={() => updateCallStatus("declined")}
+                className="w-full rounded-xl bg-red-600 py-4 text-white font-semibold"
+              >
+                Decline
+              </button>
+            </div>
           </div>
         ) : incomingCall.status === "answered" ? (
-          <div className="mt-6 flex flex-col gap-4">
-            <p className="text-lg font-semibold text-green-600">
+          <div className="mt-4 rounded-2xl bg-white p-6 shadow">
+            <p className="text-center text-lg font-semibold text-green-600">
               Call Answered
             </p>
 
-            <button
-              onClick={clearCall}
-              className="w-full rounded-lg bg-gray-300 py-3 text-black font-medium"
-            >
-              End / Clear
-            </button>
+            <div className="mt-6">
+              <button
+                onClick={clearCall}
+                className="w-full rounded-xl bg-gray-300 py-4 text-black font-semibold"
+              >
+                End / Clear
+              </button>
+            </div>
           </div>
         ) : incomingCall.status === "declined" ? (
-          <div className="mt-6 flex flex-col gap-4">
-            <p className="text-lg font-semibold text-red-600">Call Declined</p>
+          <div className="mt-4 rounded-2xl bg-white p-6 shadow">
+            <p className="text-center text-lg font-semibold text-red-600">
+              Call Declined
+            </p>
 
-            <button
-              onClick={clearCall}
-              className="w-full rounded-lg bg-gray-300 py-3 text-black font-medium"
-            >
-              Clear
-            </button>
+            <div className="mt-6">
+              <button
+                onClick={clearCall}
+                className="w-full rounded-xl bg-gray-300 py-4 text-black font-semibold"
+              >
+                Clear
+              </button>
+            </div>
           </div>
         ) : (
-          <div className="mt-6 flex flex-col gap-4">
-            <p className="text-lg font-semibold text-gray-700">
+          <div className="mt-4 rounded-2xl bg-white p-6 shadow">
+            <p className="text-center text-lg font-semibold text-gray-700">
               Call Cancelled
             </p>
 
-            <button
-              onClick={clearCall}
-              className="w-full rounded-lg bg-gray-300 py-3 text-black font-medium"
-            >
-              Clear
-            </button>
+            <div className="mt-6">
+              <button
+                onClick={clearCall}
+                className="w-full rounded-xl bg-gray-300 py-4 text-black font-semibold"
+              >
+                Clear
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -7,6 +7,18 @@ import { supabase } from "@/lib/supabase";
 
 type CallStatus = "calling" | "answered" | "declined" | "cancelled";
 
+type IceCandidateJSON = {
+  candidate: string;
+  sdpMid: string | null;
+  sdpMLineIndex: number | null;
+};
+
+type CallRowUpdate = {
+  status: CallStatus;
+  answer?: RTCSessionDescriptionInit | null;
+  resident_candidates?: IceCandidateJSON[] | null;
+};
+
 export default function CallPage({
   params,
 }: {
@@ -18,11 +30,19 @@ export default function CallPage({
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const peerRef = useRef<RTCPeerConnection | null>(null);
+  const answerAppliedRef = useRef(false);
+  const addedResidentCandidatesRef = useRef<Set<string>>(new Set());
 
   const [status, setStatus] = useState<CallStatus>("calling");
   const [error, setError] = useState("");
 
-  function stopCamera() {
+  function stopEverything() {
+    if (peerRef.current) {
+      peerRef.current.close();
+      peerRef.current = null;
+    }
+
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -33,10 +53,30 @@ export default function CallPage({
     }
   }
 
+  async function addResidentCandidates(
+    candidates: IceCandidateJSON[] | null | undefined
+  ) {
+    if (!peerRef.current || !candidates?.length) return;
+
+    for (const candidate of candidates) {
+      const key = JSON.stringify(candidate);
+
+      if (addedResidentCandidatesRef.current.has(key)) continue;
+
+      try {
+        await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        addedResidentCandidatesRef.current.add(key);
+        console.log("Visitor added resident ICE candidate:", candidate);
+      } catch (err) {
+        console.log("Visitor failed to add resident ICE candidate:", err);
+      }
+    }
+  }
+
   useEffect(() => {
     let active = true;
 
-    async function startCamera() {
+    async function startCallSetup() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user" },
@@ -53,8 +93,87 @@ export default function CallPage({
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
+
+        const peer = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+
+        peerRef.current = peer;
+
+        stream.getTracks().forEach((track) => {
+          peer.addTrack(track, stream);
+        });
+
+        peer.onicecandidate = async (event) => {
+          if (!event.candidate || !callId) return;
+
+          console.log("Visitor ICE candidate:", event.candidate);
+
+          const candidateData: IceCandidateJSON = {
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          };
+
+          const { data, error } = await supabase
+            .from("calls")
+            .select("visitor_candidates")
+            .eq("id", callId)
+            .maybeSingle();
+
+          if (error) {
+            console.log("Failed to load visitor candidates:", error);
+            return;
+          }
+
+          const existing = (data?.visitor_candidates as IceCandidateJSON[] | null) || [];
+          const alreadyExists = existing.some(
+            (item) => JSON.stringify(item) === JSON.stringify(candidateData)
+          );
+
+          if (alreadyExists) return;
+
+          const { error: updateError } = await supabase
+            .from("calls")
+            .update({
+              visitor_candidates: [...existing, candidateData],
+            })
+            .eq("id", callId);
+
+          if (updateError) {
+            console.log("Failed to save visitor ICE candidate:", updateError);
+          }
+        };
+
+        peer.onconnectionstatechange = () => {
+          console.log("Visitor connection state:", peer.connectionState);
+        };
+
+        peer.oniceconnectionstatechange = () => {
+          console.log("Visitor ICE connection state:", peer.iceConnectionState);
+        };
+
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+
+        console.log("Visitor offer created:", offer);
+
+        if (callId) {
+          const { error: offerError } = await supabase
+            .from("calls")
+            .update({
+              offer: offer,
+            })
+            .eq("id", callId);
+
+          if (offerError) {
+            console.log("Failed to save offer:", offerError);
+          }
+        }
       } catch (err: any) {
         console.log(err);
+
+        if (!active) return;
 
         if (err?.name === "NotAllowedError") {
           setError("Camera and microphone permission was denied.");
@@ -66,13 +185,13 @@ export default function CallPage({
       }
     }
 
-    startCamera();
+    startCallSetup();
 
     return () => {
       active = false;
-      stopCamera();
+      stopEverything();
     };
-  }, []);
+  }, [callId]);
 
   useEffect(() => {
     if (!callId) return;
@@ -82,7 +201,7 @@ export default function CallPage({
     async function loadCallOnce() {
       const { data, error } = await supabase
         .from("calls")
-        .select("status")
+        .select("status, answer, resident_candidates")
         .eq("id", callId)
         .maybeSingle();
 
@@ -97,8 +216,29 @@ export default function CallPage({
       setStatus(currentStatus);
 
       if (currentStatus === "declined" || currentStatus === "cancelled") {
-        stopCamera();
+        stopEverything();
       }
+
+      if (
+        data.answer &&
+        peerRef.current &&
+        !answerAppliedRef.current &&
+        !peerRef.current.currentRemoteDescription
+      ) {
+        try {
+          await peerRef.current.setRemoteDescription(
+            new RTCSessionDescription(data.answer)
+          );
+          answerAppliedRef.current = true;
+          console.log("Visitor applied answer from initial load");
+        } catch (err) {
+          console.log("Failed to apply initial answer:", err);
+        }
+      }
+
+      await addResidentCandidates(
+        (data.resident_candidates as IceCandidateJSON[] | null) || []
+      );
     }
 
     loadCallOnce();
@@ -113,13 +253,33 @@ export default function CallPage({
           table: "calls",
           filter: `id=eq.${callId}`,
         },
-        (payload) => {
-          const updated = payload.new as { status: CallStatus };
+        async (payload) => {
+          const updated = payload.new as CallRowUpdate;
           setStatus(updated.status);
 
           if (updated.status === "declined" || updated.status === "cancelled") {
-            stopCamera();
+            stopEverything();
+            return;
           }
+
+          if (
+            updated.answer &&
+            peerRef.current &&
+            !answerAppliedRef.current &&
+            !peerRef.current.currentRemoteDescription
+          ) {
+            try {
+              await peerRef.current.setRemoteDescription(
+                new RTCSessionDescription(updated.answer)
+              );
+              answerAppliedRef.current = true;
+              console.log("Visitor applied answer from realtime update");
+            } catch (err) {
+              console.log("Failed to apply realtime answer:", err);
+            }
+          }
+
+          await addResidentCandidates(updated.resident_candidates || []);
         }
       )
       .on(
@@ -132,7 +292,7 @@ export default function CallPage({
         },
         () => {
           setStatus("cancelled");
-          stopCamera();
+          stopEverything();
         }
       )
       .subscribe();
@@ -151,7 +311,7 @@ export default function CallPage({
       .update({ status: "cancelled" })
       .eq("id", callId);
 
-    stopCamera();
+    stopEverything();
   }
 
   if (status === "declined") {
