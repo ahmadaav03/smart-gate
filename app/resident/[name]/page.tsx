@@ -80,24 +80,29 @@ export default function ResidentPage({
   }
 
   async function addVisitorCandidates(
-    candidates: IceCandidateJSON[] | null | undefined
-  ) {
-    if (!peerRef.current || !candidates?.length) return;
+  candidates: IceCandidateJSON[] | null | undefined
+) {
+  if (!peerRef.current || !candidates?.length) return;
 
-    for (const candidate of candidates) {
-      const key = JSON.stringify(candidate);
+  if (!peerRef.current.remoteDescription) {
+    console.log("Skipping ICE - remote description not set yet");
+    return;
+  }
 
-      if (addedVisitorCandidatesRef.current.has(key)) continue;
+  for (const candidate of candidates) {
+    const key = JSON.stringify(candidate);
 
-      try {
-        await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-        addedVisitorCandidatesRef.current.add(key);
-        console.log("Resident added visitor ICE candidate:", candidate);
-      } catch (err) {
-        console.log("Resident failed to add visitor ICE candidate:", err);
-      }
+    if (addedVisitorCandidatesRef.current.has(key)) continue;
+
+    try {
+      await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+      addedVisitorCandidatesRef.current.add(key);
+      console.log("Resident added visitor ICE candidate:", candidate);
+    } catch (err) {
+      console.log("Resident failed to add visitor ICE candidate:", err);
     }
   }
+}
 
   async function hydrateLocation(call: {
     site_id?: string | null;
@@ -238,8 +243,12 @@ export default function ResidentPage({
 
   useEffect(() => {
     async function prepareIncomingVideo() {
-      if (!incomingCall?.offer) return;
-      if (peerRef.current) return;
+  if (!incomingCall?.offer) return;
+
+  if (peerRef.current) {
+    console.log("Resetting peer for new offer");
+    stopPeer();
+  }
 
       try {
         console.log("Resident preparing incoming video");
@@ -372,7 +381,7 @@ export default function ResidentPage({
     }
 
     prepareIncomingVideo();
-  }, [incomingCall]);
+  }, [incomingCall?.offer]);
 
   useEffect(() => {
     async function syncVisitorCandidates() {
