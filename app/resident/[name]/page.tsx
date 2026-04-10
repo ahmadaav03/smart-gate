@@ -9,16 +9,23 @@ type IceCandidateJSON = {
   sdpMLineIndex: number | null;
 };
 
+type Resident = {
+  id: string;
+  slug: string;
+  full_name: string;
+};
+
 type Call = {
   id: string;
-  house_slug: string;
-  resident_slug: string;
   status: "calling" | "answered" | "declined" | "cancelled";
   created_at: string;
   offer?: RTCSessionDescriptionInit | null;
   answer?: RTCSessionDescriptionInit | null;
   visitor_candidates?: IceCandidateJSON[] | null;
   resident_candidates?: IceCandidateJSON[] | null;
+  resident_id?: string | null;
+  site_id?: string | null;
+  unit_id?: string | null;
 };
 
 export default function ResidentPage({
@@ -28,12 +35,18 @@ export default function ResidentPage({
 }) {
   const { name } = use(params);
   const residentSlug = name.toLowerCase();
-  const displayName = name.charAt(0).toUpperCase() + name.slice(1);
 
+  const [resident, setResident] = useState<Resident | null>(null);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
+  const [siteName, setSiteName] = useState("");
+  const [unitName, setUnitName] = useState("");
+
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const addedVisitorCandidatesRef = useRef<Set<string>>(new Set());
+
+  const displayName =
+    resident?.full_name || name.charAt(0).toUpperCase() + name.slice(1);
 
   function stopPeer() {
     if (peerRef.current) {
@@ -66,14 +79,85 @@ export default function ResidentPage({
     }
   }
 
+  async function hydrateLocation(call: {
+    site_id?: string | null;
+    unit_id?: string | null;
+  }) {
+    try {
+      if (call.site_id) {
+        const { data: siteData, error: siteError } = await supabase
+          .from("sites")
+          .select("name")
+          .eq("id", call.site_id)
+          .maybeSingle();
+
+        if (!siteError && siteData?.name) {
+          setSiteName(siteData.name);
+        } else {
+          setSiteName("");
+        }
+      } else {
+        setSiteName("");
+      }
+
+      if (call.unit_id) {
+        const { data: unitData, error: unitError } = await supabase
+          .from("units")
+          .select("name")
+          .eq("id", call.unit_id)
+          .maybeSingle();
+
+        if (!unitError && unitData?.name) {
+          setUnitName(unitData.name);
+        } else {
+          setUnitName("");
+        }
+      } else {
+        setUnitName("");
+      }
+    } catch (err) {
+      console.log("Failed to hydrate location:", err);
+    }
+  }
+
   useEffect(() => {
+    let active = true;
+
+    async function loadResident() {
+      const { data, error } = await supabase
+        .from("residents")
+        .select("id, slug, full_name")
+        .eq("slug", residentSlug)
+        .maybeSingle();
+
+      if (error) {
+        console.log(error);
+        return;
+      }
+
+      if (active) {
+        setResident((data as Resident) || null);
+      }
+    }
+
+    loadResident();
+
+    return () => {
+      active = false;
+    };
+  }, [residentSlug]);
+
+  useEffect(() => {
+    if (!resident?.id) return;
+
+    const residentId = resident.id;
     let active = true;
 
     async function loadLatestCallOnce() {
       const { data, error } = await supabase
         .from("calls")
         .select("*")
-        .eq("resident_slug", residentSlug)
+        .eq("resident_id", residentId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -84,31 +168,42 @@ export default function ResidentPage({
       }
 
       if (active) {
-        setIncomingCall((data as Call) || null);
+        const call = (data as Call) || null;
+        setIncomingCall(call);
+
+        if (call) {
+          await hydrateLocation(call);
+        } else {
+          setSiteName("");
+          setUnitName("");
+        }
       }
     }
 
     loadLatestCallOnce();
 
     const channel = supabase
-      .channel(`resident-${residentSlug}`)
+      .channel(`resident-${residentId}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "calls",
-          filter: `resident_slug=eq.${residentSlug}`,
+          filter: `resident_id=eq.${residentId}`,
         },
-        (payload) => {
+        async (payload) => {
           if (payload.eventType === "DELETE") {
             setIncomingCall(null);
+            setSiteName("");
+            setUnitName("");
             stopPeer();
             return;
           }
 
           const row = payload.new as Call;
           setIncomingCall(row);
+          await hydrateLocation(row);
         }
       )
       .subscribe();
@@ -118,7 +213,7 @@ export default function ResidentPage({
       supabase.removeChannel(channel);
       stopPeer();
     };
-  }, [residentSlug]);
+  }, [resident?.id]);
 
   useEffect(() => {
     async function prepareIncomingVideo() {
@@ -294,7 +389,14 @@ export default function ResidentPage({
 
     stopPeer();
     setIncomingCall(null);
+    setSiteName("");
+    setUnitName("");
   }
+
+  const locationLine =
+    unitName && siteName
+      ? `${unitName} • ${siteName}`
+      : unitName || siteName || "Visitor call";
 
   return (
     <div className="min-h-screen bg-gray-100 px-4 py-6">
@@ -321,7 +423,7 @@ export default function ResidentPage({
           <div className="mt-4 rounded-2xl bg-white p-6 shadow">
             <p className="text-center text-lg font-semibold">Incoming Call</p>
             <p className="mt-2 text-center text-gray-500">
-              Visitor from House {incomingCall.house_slug} is waiting
+              Visitor is waiting at {locationLine}
             </p>
 
             <div className="mt-6 flex flex-col gap-3">
@@ -350,7 +452,7 @@ export default function ResidentPage({
               Call in progress
             </p>
             <p className="mt-2 text-center text-gray-500">
-              You are connected to the visitor from House {incomingCall.house_slug}
+              You are connected to the visitor at {locationLine}
             </p>
 
             <div className="mt-6 flex flex-col gap-3">
