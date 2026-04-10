@@ -40,9 +40,13 @@ export default function ResidentPage({
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
   const [siteName, setSiteName] = useState("");
   const [unitName, setUnitName] = useState("");
+  const [audioError, setAudioError] = useState("");
 
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const audioSenderRef = useRef<RTCRtpSender | null>(null);
   const addedVisitorCandidatesRef = useRef<Set<string>>(new Set());
 
   const displayName =
@@ -54,8 +58,24 @@ export default function ResidentPage({
       peerRef.current = null;
     }
 
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+    }
+
+    audioSenderRef.current = null;
+    addedVisitorCandidatesRef.current = new Set();
+
     if (remoteVideoRef.current) {
+      remoteVideoRef.current.pause();
       remoteVideoRef.current.srcObject = null;
+      remoteVideoRef.current.muted = true;
+    }
+
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.pause();
+      remoteAudioRef.current.srcObject = null;
+      remoteAudioRef.current.muted = true;
     }
   }
 
@@ -197,6 +217,7 @@ export default function ResidentPage({
             setIncomingCall(null);
             setSiteName("");
             setUnitName("");
+            setAudioError("");
             stopPeer();
             return;
           }
@@ -229,15 +250,25 @@ export default function ResidentPage({
 
         peerRef.current = peer;
 
+        audioSenderRef.current = peer
+          .addTransceiver("audio", { direction: "sendrecv" })
+          .sender;
+
         peer.ontrack = async (event) => {
           console.log("Resident received ontrack event", event);
 
           const [remoteStream] = event.streams;
 
-          if (remoteVideoRef.current && remoteStream) {
-            console.log("Resident attaching remote stream", remoteStream);
+          if (!remoteStream) {
+            console.log("Resident ontrack fired, but no stream found");
+            return;
+          }
 
+          console.log("Resident attaching remote stream", remoteStream);
+
+          if (remoteVideoRef.current) {
             remoteVideoRef.current.srcObject = remoteStream;
+            remoteVideoRef.current.muted = true;
 
             try {
               await remoteVideoRef.current.play();
@@ -245,8 +276,18 @@ export default function ResidentPage({
             } catch (playError) {
               console.log("Resident video play() failed:", playError);
             }
-          } else {
-            console.log("Resident ontrack fired, but no stream found");
+          }
+
+          if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteAudioRef.current.muted = incomingCall.status !== "answered";
+
+            try {
+              await remoteAudioRef.current.play();
+              console.log("Resident audio playback started");
+            } catch (audioPlayError) {
+              console.log("Resident audio play() failed:", audioPlayError);
+            }
           }
         };
 
@@ -314,7 +355,7 @@ export default function ResidentPage({
         const { error } = await supabase
           .from("calls")
           .update({
-            answer: answer,
+            answer,
           })
           .eq("id", incomingCall.id);
 
@@ -336,19 +377,95 @@ export default function ResidentPage({
   useEffect(() => {
     async function syncVisitorCandidates() {
       if (!incomingCall?.id || !peerRef.current) return;
-
       await addVisitorCandidates(incomingCall.visitor_candidates || []);
     }
 
     syncVisitorCandidates();
   }, [incomingCall?.visitor_candidates, incomingCall?.id]);
 
-  async function updateCallStatus(newStatus: "answered" | "declined") {
+  useEffect(() => {
+    async function syncAnsweredAudio() {
+      if (!remoteAudioRef.current) return;
+
+      if (incomingCall?.status === "answered") {
+        remoteAudioRef.current.muted = false;
+
+        try {
+          await remoteAudioRef.current.play();
+          console.log("Resident audio unmuted after answer");
+        } catch (err) {
+          console.log("Resident audio playback after answer failed:", err);
+        }
+      } else {
+        remoteAudioRef.current.muted = true;
+      }
+    }
+
+    syncAnsweredAudio();
+  }, [incomingCall?.status]);
+
+  async function answerCall() {
+    if (!incomingCall || !audioSenderRef.current) return;
+
+    setAudioError("");
+
+    try {
+      const micStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+
+      micStreamRef.current = micStream;
+
+      const audioTrack = micStream.getAudioTracks()[0] || null;
+
+      if (!audioTrack) {
+        setAudioError("No microphone was found on this device.");
+        return;
+      }
+
+      await audioSenderRef.current.replaceTrack(audioTrack);
+
+      const { error } = await supabase
+        .from("calls")
+        .update({ status: "answered" })
+        .eq("id", incomingCall.id);
+
+      if (error) {
+        console.log(error);
+        setAudioError("Could not answer the call.");
+        return;
+      }
+
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.muted = false;
+
+        try {
+          await remoteAudioRef.current.play();
+          console.log("Resident audio started after answer");
+        } catch (err) {
+          console.log("Resident audio start failed:", err);
+        }
+      }
+    } catch (err: any) {
+      console.log(err);
+
+      if (err?.name === "NotAllowedError") {
+        setAudioError("Please allow microphone access to answer the call.");
+      } else if (err?.name === "NotFoundError") {
+        setAudioError("No microphone was found on this device.");
+      } else {
+        setAudioError("Could not start the microphone.");
+      }
+    }
+  }
+
+  async function declineCall() {
     if (!incomingCall) return;
 
     const { error } = await supabase
       .from("calls")
-      .update({ status: newStatus })
+      .update({ status: "declined" })
       .eq("id", incomingCall.id);
 
     if (error) console.log(error);
@@ -391,6 +508,7 @@ export default function ResidentPage({
     setIncomingCall(null);
     setSiteName("");
     setUnitName("");
+    setAudioError("");
   }
 
   const locationLine =
@@ -409,10 +527,10 @@ export default function ResidentPage({
           <video
             ref={remoteVideoRef}
             autoPlay
-            muted
             playsInline
             className="h-[420px] w-full object-cover"
           />
+          <audio ref={remoteAudioRef} autoPlay playsInline />
         </div>
 
         {!incomingCall ? (
@@ -426,20 +544,26 @@ export default function ResidentPage({
               Visitor is waiting at {locationLine}
             </p>
 
+            {audioError ? (
+              <p className="mt-4 rounded-xl bg-red-100 px-4 py-3 text-center text-sm text-red-700">
+                {audioError}
+              </p>
+            ) : null}
+
             <div className="mt-6 flex flex-col gap-3">
               <div className="w-full rounded-xl bg-yellow-500 py-4 text-center text-white font-semibold">
                 Ringing...
               </div>
 
               <button
-                onClick={() => updateCallStatus("answered")}
+                onClick={answerCall}
                 className="w-full rounded-xl bg-green-600 py-4 text-white font-semibold"
               >
                 Answer Call
               </button>
 
               <button
-                onClick={() => updateCallStatus("declined")}
+                onClick={declineCall}
                 className="w-full rounded-xl bg-red-600 py-4 text-white font-semibold"
               >
                 Decline Call
@@ -454,6 +578,12 @@ export default function ResidentPage({
             <p className="mt-2 text-center text-gray-500">
               You are connected to the visitor at {locationLine}
             </p>
+
+            {audioError ? (
+              <p className="mt-4 rounded-xl bg-red-100 px-4 py-3 text-center text-sm text-red-700">
+                {audioError}
+              </p>
+            ) : null}
 
             <div className="mt-6 flex flex-col gap-3">
               <div className="w-full rounded-xl bg-green-600 py-4 text-center text-white font-semibold">
