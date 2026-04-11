@@ -80,29 +80,29 @@ export default function ResidentPage({
   }
 
   async function addVisitorCandidates(
-  candidates: IceCandidateJSON[] | null | undefined
-) {
-  if (!peerRef.current || !candidates?.length) return;
+    candidates: IceCandidateJSON[] | null | undefined
+  ) {
+    if (!peerRef.current || !candidates?.length) return;
 
-  if (!peerRef.current.remoteDescription) {
-    console.log("Skipping ICE - remote description not set yet");
-    return;
-  }
+    if (!peerRef.current.remoteDescription) {
+      console.log("Skipping ICE - remote description not set yet");
+      return;
+    }
 
-  for (const candidate of candidates) {
-    const key = JSON.stringify(candidate);
+    for (const candidate of candidates) {
+      const key = JSON.stringify(candidate);
 
-    if (addedVisitorCandidatesRef.current.has(key)) continue;
+      if (addedVisitorCandidatesRef.current.has(key)) continue;
 
-    try {
-      await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-      addedVisitorCandidatesRef.current.add(key);
-      console.log("Resident added visitor ICE candidate:", candidate);
-    } catch (err) {
-      console.log("Resident failed to add visitor ICE candidate:", err);
+      try {
+        await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        addedVisitorCandidatesRef.current.add(key);
+        console.log("Resident added visitor ICE candidate:", candidate);
+      } catch (err) {
+        console.log("Resident failed to add visitor ICE candidate:", err);
+      }
     }
   }
-}
 
   async function hydrateLocation(call: {
     site_id?: string | null;
@@ -144,21 +144,6 @@ export default function ResidentPage({
       console.log("Failed to hydrate location:", err);
     }
   }
-
-  async function fetchFullCall(callId: string) {
-  const { data, error } = await supabase
-    .from("calls")
-    .select("*")
-    .eq("id", callId)
-    .maybeSingle();
-
-  if (error) {
-    console.log("Failed to fetch full call:", error);
-    return null;
-  }
-
-  return (data as Call) || null;
-}
 
   useEffect(() => {
     let active = true;
@@ -209,16 +194,14 @@ export default function ResidentPage({
 
       if (active) {
         const call = (data as Call) || null;
-        const fullCall = call?.id ? await fetchFullCall(call.id) : call;
+        setIncomingCall(call);
 
-        setIncomingCall(fullCall);
-
-        if (fullCall) {
-  await hydrateLocation(fullCall);
-} else {
-  setSiteName("");
-  setUnitName("");
-}
+        if (call) {
+          await hydrateLocation(call);
+        } else {
+          setSiteName("");
+          setUnitName("");
+        }
       }
     }
 
@@ -245,14 +228,8 @@ export default function ResidentPage({
           }
 
           const row = payload.new as Call;
-
-const fullCall = row.id ? await fetchFullCall(row.id) : row;
-
-setIncomingCall(fullCall);
-
-if (fullCall) {
-  await hydrateLocation(fullCall);
-}
+          setIncomingCall(row);
+          await hydrateLocation(row);
         }
       )
       .subscribe();
@@ -266,14 +243,14 @@ if (fullCall) {
 
   useEffect(() => {
     async function prepareIncomingVideo() {
-  if (!incomingCall?.offer) return;
+      if (!incomingCall?.offer) return;
 
-  if (peerRef.current) {
-    console.log("Resetting peer for new offer");
-    stopPeer();
-  }
+      if (peerRef.current) {
+        console.log("Resetting peer for new offer");
+        stopPeer();
+      }
 
-  await new Promise((resolve) =>setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       try {
         console.log("Resident preparing incoming video");
@@ -376,6 +353,7 @@ if (fullCall) {
         };
 
         if (!peerRef.current) return;
+
         await peer.setRemoteDescription(
           new RTCSessionDescription(incomingCall.offer)
         );
