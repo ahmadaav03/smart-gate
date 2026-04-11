@@ -250,6 +250,8 @@ export default function ResidentPage({
     stopPeer();
   }
 
+  await new Promise((resolve) =>setTimeout(resolve, 200));
+
       try {
         console.log("Resident preparing incoming video");
 
@@ -350,6 +352,7 @@ export default function ResidentPage({
           console.log("Resident ICE connection state:", peer.iceConnectionState);
         };
 
+        if (!peerRef.current) return;
         await peer.setRemoteDescription(
           new RTCSessionDescription(incomingCall.offer)
         );
