@@ -145,6 +145,21 @@ export default function ResidentPage({
     }
   }
 
+  async function fetchFullCall(callId: string) {
+  const { data, error } = await supabase
+    .from("calls")
+    .select("*")
+    .eq("id", callId)
+    .maybeSingle();
+
+  if (error) {
+    console.log("Failed to fetch full call:", error);
+    return null;
+  }
+
+  return (data as Call) || null;
+}
+
   useEffect(() => {
     let active = true;
 
@@ -194,14 +209,16 @@ export default function ResidentPage({
 
       if (active) {
         const call = (data as Call) || null;
-        setIncomingCall(call);
+        const fullCall = call?.id ? await fetchFullCall(call.id) : call;
 
-        if (call) {
-          await hydrateLocation(call);
-        } else {
-          setSiteName("");
-          setUnitName("");
-        }
+        setIncomingCall(fullCall);
+
+        if (fullCall) {
+  await hydrateLocation(fullCall);
+} else {
+  setSiteName("");
+  setUnitName("");
+}
       }
     }
 
@@ -228,8 +245,14 @@ export default function ResidentPage({
           }
 
           const row = payload.new as Call;
-          setIncomingCall(row);
-          await hydrateLocation(row);
+
+const fullCall = row.id ? await fetchFullCall(row.id) : row;
+
+setIncomingCall(fullCall);
+
+if (fullCall) {
+  await hydrateLocation(fullCall);
+}
         }
       )
       .subscribe();
