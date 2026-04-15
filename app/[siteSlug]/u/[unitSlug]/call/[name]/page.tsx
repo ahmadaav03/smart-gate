@@ -39,6 +39,7 @@ export default function UnitCallPage({
   const callId = searchParams.get("callId");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const answerAppliedRef = useRef(false);
@@ -65,6 +66,12 @@ export default function UnitCallPage({
 
     if (videoRef.current) {
       videoRef.current.srcObject = null;
+    }
+
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.pause();
+      remoteAudioRef.current.srcObject = null;
+      remoteAudioRef.current.muted = true;
     }
   }
 
@@ -171,6 +178,27 @@ export default function UnitCallPage({
           peer.addTrack(track, stream);
         });
 
+        peer.ontrack = async (event) => {
+          const [remoteStream] = event.streams;
+
+          if (!remoteStream) {
+            console.log("Visitor ontrack fired, but no stream found");
+            return;
+          }
+
+          if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteAudioRef.current.muted = status !== "answered";
+
+            try {
+              await remoteAudioRef.current.play();
+              console.log("Visitor audio playback started");
+            } catch (err) {
+              console.log("Visitor audio play failed:", err);
+            }
+          }
+        };
+
         peer.onicecandidate = async (event) => {
           if (!event.candidate || !callId) return;
 
@@ -247,7 +275,7 @@ export default function UnitCallPage({
       active = false;
       stopEverything();
     };
-  }, [callId]);
+  }, [callId, status]);
 
   useEffect(() => {
     if (!callId) return;
@@ -257,7 +285,9 @@ export default function UnitCallPage({
     async function loadCallOnce() {
       const { data, error } = await supabase
         .from("calls")
-        .select("id, status, answer, resident_candidates, site_id, unit_id, resident_id")
+        .select(
+          "id, status, answer, resident_candidates, site_id, unit_id, resident_id"
+        )
         .eq("id", callId)
         .maybeSingle();
 
@@ -358,6 +388,27 @@ export default function UnitCallPage({
     };
   }, [callId]);
 
+  useEffect(() => {
+    async function syncRemoteAudio() {
+      if (!remoteAudioRef.current) return;
+
+      if (status === "answered") {
+        remoteAudioRef.current.muted = false;
+
+        try {
+          await remoteAudioRef.current.play();
+          console.log("Visitor audio unmuted after answer");
+        } catch (err) {
+          console.log("Visitor audio playback after answer failed:", err);
+        }
+      } else {
+        remoteAudioRef.current.muted = true;
+      }
+    }
+
+    syncRemoteAudio();
+  }, [status]);
+
   async function cancelCall() {
     if (!callId) return;
 
@@ -414,6 +465,7 @@ export default function UnitCallPage({
         playsInline
         className="h-screen w-screen object-cover"
       />
+      <audio ref={remoteAudioRef} autoPlay playsInline />
 
       <div className="absolute inset-0 bg-black/20" />
 
