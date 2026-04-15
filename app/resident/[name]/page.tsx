@@ -48,6 +48,7 @@ export default function ResidentPage({
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioSenderRef = useRef<RTCRtpSender | null>(null);
   const addedVisitorCandidatesRef = useRef<Set<string>>(new Set());
+  const previewRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const displayName =
     resident?.full_name || name.charAt(0).toUpperCase() + name.slice(1);
@@ -65,6 +66,10 @@ export default function ResidentPage({
 
     audioSenderRef.current = null;
     addedVisitorCandidatesRef.current = new Set();
+    if (previewRetryTimeoutRef.current) {
+  clearTimeout(previewRetryTimeoutRef.current);
+  previewRetryTimeoutRef.current = null;
+}
 
     if (remoteVideoRef.current) {
       remoteVideoRef.current.pause();
@@ -242,150 +247,177 @@ export default function ResidentPage({
   }, [resident?.id]);
 
   useEffect(() => {
-    async function prepareIncomingVideo() {
-      if (!incomingCall?.offer) return;
+  async function prepareIncomingVideo(isRetry = false) {
+    if (!incomingCall?.offer) return;
+    if (incomingCall.status === "declined" || incomingCall.status === "cancelled") return;
 
-      if (peerRef.current) {
-        console.log("Resetting peer for new offer");
+    if (peerRef.current) {
+      if (isRetry) {
         stopPeer();
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      try {
-        console.log("Resident preparing incoming video");
-
-        const peer = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        });
-
-        peerRef.current = peer;
-
-        audioSenderRef.current = peer
-          .addTransceiver("audio", { direction: "sendrecv" })
-          .sender;
-
-        peer.ontrack = async (event) => {
-          console.log("Resident received ontrack event", event);
-
-          const [remoteStream] = event.streams;
-
-          if (!remoteStream) {
-            console.log("Resident ontrack fired, but no stream found");
-            return;
-          }
-
-          console.log("Resident attaching remote stream", remoteStream);
-
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteStream;
-            remoteVideoRef.current.muted = true;
-
-            try {
-              await remoteVideoRef.current.play();
-              console.log("Resident video playback started");
-            } catch (playError) {
-              console.log("Resident video play() failed:", playError);
-            }
-          }
-
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = remoteStream;
-            remoteAudioRef.current.muted = incomingCall.status !== "answered";
-
-            try {
-              await remoteAudioRef.current.play();
-              console.log("Resident audio playback started");
-            } catch (audioPlayError) {
-              console.log("Resident audio play() failed:", audioPlayError);
-            }
-          }
-        };
-
-        peer.onicecandidate = async (event) => {
-          if (!event.candidate || !incomingCall?.id) return;
-
-          console.log("Resident ICE candidate:", event.candidate);
-
-          const candidateData: IceCandidateJSON = {
-            candidate: event.candidate.candidate,
-            sdpMid: event.candidate.sdpMid,
-            sdpMLineIndex: event.candidate.sdpMLineIndex,
-          };
-
-          const { data, error } = await supabase
-            .from("calls")
-            .select("resident_candidates")
-            .eq("id", incomingCall.id)
-            .maybeSingle();
-
-          if (error) {
-            console.log("Failed to load resident candidates:", error);
-            return;
-          }
-
-          const existing =
-            (data?.resident_candidates as IceCandidateJSON[] | null) || [];
-          const alreadyExists = existing.some(
-            (item) => JSON.stringify(item) === JSON.stringify(candidateData)
-          );
-
-          if (alreadyExists) return;
-
-          const { error: updateError } = await supabase
-            .from("calls")
-            .update({
-              resident_candidates: [...existing, candidateData],
-            })
-            .eq("id", incomingCall.id);
-
-          if (updateError) {
-            console.log("Failed to save resident ICE candidate:", updateError);
-          }
-        };
-
-        peer.onconnectionstatechange = () => {
-          console.log("Resident connection state:", peer.connectionState);
-        };
-
-        peer.oniceconnectionstatechange = () => {
-          console.log("Resident ICE connection state:", peer.iceConnectionState);
-        };
-
-        if (!peerRef.current) return;
-
-        await peer.setRemoteDescription(
-          new RTCSessionDescription(incomingCall.offer)
-        );
-
-        console.log("Resident applied remote offer");
-
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
-
-        console.log("Resident created answer:", answer);
-
-        const { error } = await supabase
-          .from("calls")
-          .update({
-            answer,
-          })
-          .eq("id", incomingCall.id);
-
-        if (error) {
-          console.log("Failed to save answer:", error);
-        } else {
-          console.log("Resident saved answer successfully");
-        }
-
-        await addVisitorCandidates(incomingCall.visitor_candidates || []);
-      } catch (err) {
-        console.log("Failed to prepare resident peer:", err);
+      } else {
+        return;
       }
     }
 
-    prepareIncomingVideo();
-  }, [incomingCall?.offer]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    try {
+      console.log("Resident preparing incoming video", { isRetry });
+
+      const peer = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      peerRef.current = peer;
+
+      audioSenderRef.current = peer
+        .addTransceiver("audio", { direction: "sendrecv" })
+        .sender;
+
+      peer.ontrack = async (event) => {
+        console.log("Resident received ontrack event", event);
+
+        const [remoteStream] = event.streams;
+
+        if (!remoteStream) {
+          console.log("Resident ontrack fired, but no stream found");
+          return;
+        }
+
+        console.log("Resident attaching remote stream", remoteStream);
+
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+          remoteVideoRef.current.muted = true;
+
+          try {
+            await remoteVideoRef.current.play();
+            console.log("Resident video playback started");
+          } catch (playError) {
+            console.log("Resident video play() failed:", playError);
+          }
+        }
+
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = remoteStream;
+          remoteAudioRef.current.muted = incomingCall.status !== "answered";
+
+          try {
+            await remoteAudioRef.current.play();
+            console.log("Resident audio playback started");
+          } catch (audioPlayError) {
+            console.log("Resident audio play() failed:", audioPlayError);
+          }
+        }
+      };
+
+      peer.onicecandidate = async (event) => {
+        if (!event.candidate || !incomingCall?.id) return;
+
+        console.log("Resident ICE candidate:", event.candidate);
+
+        const candidateData: IceCandidateJSON = {
+          candidate: event.candidate.candidate,
+          sdpMid: event.candidate.sdpMid,
+          sdpMLineIndex: event.candidate.sdpMLineIndex,
+        };
+
+        const { data, error } = await supabase
+          .from("calls")
+          .select("resident_candidates")
+          .eq("id", incomingCall.id)
+          .maybeSingle();
+
+        if (error) {
+          console.log("Failed to load resident candidates:", error);
+          return;
+        }
+
+        const existing =
+          (data?.resident_candidates as IceCandidateJSON[] | null) || [];
+        const alreadyExists = existing.some(
+          (item) => JSON.stringify(item) === JSON.stringify(candidateData)
+        );
+
+        if (alreadyExists) return;
+
+        const { error: updateError } = await supabase
+          .from("calls")
+          .update({
+            resident_candidates: [...existing, candidateData],
+          })
+          .eq("id", incomingCall.id);
+
+        if (updateError) {
+          console.log("Failed to save resident ICE candidate:", updateError);
+        }
+      };
+
+      peer.onconnectionstatechange = () => {
+        console.log("Resident connection state:", peer.connectionState);
+      };
+
+      peer.oniceconnectionstatechange = () => {
+        console.log("Resident ICE connection state:", peer.iceConnectionState);
+      };
+
+      await peer.setRemoteDescription(
+        new RTCSessionDescription(incomingCall.offer)
+      );
+
+      console.log("Resident applied remote offer");
+
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+
+      console.log("Resident created answer:", answer);
+
+      const { error } = await supabase
+        .from("calls")
+        .update({
+          answer,
+        })
+        .eq("id", incomingCall.id);
+
+      if (error) {
+        console.log("Failed to save answer:", error);
+      } else {
+        console.log("Resident saved answer successfully");
+      }
+
+      await addVisitorCandidates(incomingCall.visitor_candidates || []);
+
+      if (
+        incomingCall.status === "calling" &&
+        previewRetryTimeoutRef.current === null
+      ) {
+        previewRetryTimeoutRef.current = setTimeout(() => {
+          previewRetryTimeoutRef.current = null;
+
+          const hasVideo =
+            !!remoteVideoRef.current?.srcObject &&
+            (remoteVideoRef.current.srcObject as MediaStream).getVideoTracks().length > 0;
+
+          if (!hasVideo) {
+            console.log("Resident preview missing, retrying once");
+            prepareIncomingVideo(true);
+          }
+        }, 1200);
+      }
+    } catch (err) {
+      console.log("Failed to prepare resident peer:", err);
+    }
+  }
+
+  prepareIncomingVideo(false);
+
+  return () => {
+    if (previewRetryTimeoutRef.current) {
+      clearTimeout(previewRetryTimeoutRef.current);
+      previewRetryTimeoutRef.current = null;
+    }
+  };
+}, [incomingCall?.id, incomingCall?.offer, incomingCall?.status]);
 
   useEffect(() => {
     async function syncVisitorCandidates() {
