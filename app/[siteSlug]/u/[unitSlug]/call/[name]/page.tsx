@@ -275,7 +275,7 @@ export default function UnitCallPage({
       active = false;
       stopEverything();
     };
-  }, [callId, status]);
+  }, [callId]);
 
   useEffect(() => {
     if (!callId) return;
