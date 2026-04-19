@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 type CallStatus = "calling" | "answered" | "declined" | "cancelled";
+type MediaMode = "video" | "audio_only";
 
 type IceCandidateJSON = {
   candidate: string;
@@ -17,6 +18,8 @@ type CallRowUpdate = {
   status: CallStatus;
   answer?: RTCSessionDescriptionInit | null;
   resident_candidates?: IceCandidateJSON[] | null;
+  expires_at?: string | null;
+  media_mode?: MediaMode | null;
 };
 
 type CallRow = {
@@ -27,7 +30,12 @@ type CallRow = {
   site_id?: string | null;
   unit_id?: string | null;
   resident_id?: string | null;
+  expires_at?: string | null;
+  media_mode?: MediaMode | null;
 };
+
+type SetupMode = "video" | "audio_only";
+type SetupState = "idle" | "starting" | "fallback" | "ready";
 
 export default function UnitCallPage({
   params,
@@ -52,6 +60,9 @@ export default function UnitCallPage({
   const [error, setError] = useState("");
   const [displayName, setDisplayName] = useState(fallbackDisplayName);
   const [backHref, setBackHref] = useState(fallbackBackHref);
+  const [mediaMode, setMediaMode] = useState<MediaMode>("video");
+  const [setupState, setSetupState] = useState<SetupState>("idle");
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
   function stopEverything() {
     if (peerRef.current) {
@@ -63,6 +74,9 @@ export default function UnitCallPage({
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+
+    answerAppliedRef.current = false;
+    addedResidentCandidatesRef.current = new Set();
 
     if (videoRef.current) {
       videoRef.current.srcObject = null;
@@ -147,132 +161,167 @@ export default function UnitCallPage({
     }
   }
 
-  useEffect(() => {
-    let active = true;
+  async function startCallSetup(mode: SetupMode) {
+    if (!callId) return;
 
-    async function startCallSetup() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: true,
-        });
+    stopEverything();
+    setError("");
+    setSetupState("starting");
+    setMediaMode(mode);
 
-        if (!active) {
-          stream.getTracks().forEach((track) => track.stop());
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(
+        mode === "video"
+          ? {
+              video: { facingMode: "user" },
+              audio: true,
+            }
+          : {
+              video: false,
+              audio: true,
+            }
+      );
+
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        const hasVideo = stream.getVideoTracks().length > 0;
+        videoRef.current.srcObject = hasVideo ? stream : null;
+      }
+
+      const peer = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      peerRef.current = peer;
+
+      stream.getTracks().forEach((track) => {
+        peer.addTrack(track, stream);
+      });
+
+      peer.ontrack = async (event) => {
+        const [remoteStream] = event.streams;
+
+        if (!remoteStream) {
+          console.log("Visitor ontrack fired, but no stream found");
           return;
         }
 
-        streamRef.current = stream;
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = remoteStream;
+          remoteAudioRef.current.muted = status !== "answered";
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-
-        const peer = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        });
-
-        peerRef.current = peer;
-
-        stream.getTracks().forEach((track) => {
-          peer.addTrack(track, stream);
-        });
-
-        peer.ontrack = async (event) => {
-          const [remoteStream] = event.streams;
-
-          if (!remoteStream) {
-            console.log("Visitor ontrack fired, but no stream found");
-            return;
-          }
-
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = remoteStream;
-            remoteAudioRef.current.muted = status !== "answered";
-
-            try {
-              await remoteAudioRef.current.play();
-              console.log("Visitor audio playback started");
-            } catch (err) {
-              console.log("Visitor audio play failed:", err);
-            }
-          }
-        };
-
-        peer.onicecandidate = async (event) => {
-          if (!event.candidate || !callId) return;
-
-          const candidateData: IceCandidateJSON = {
-            candidate: event.candidate.candidate,
-            sdpMid: event.candidate.sdpMid,
-            sdpMLineIndex: event.candidate.sdpMLineIndex,
-          };
-
-          const { data, error } = await supabase
-            .from("calls")
-            .select("visitor_candidates")
-            .eq("id", callId)
-            .maybeSingle();
-
-          if (error) {
-            console.log("Failed to load visitor candidates:", error);
-            return;
-          }
-
-          const existing =
-            (data?.visitor_candidates as IceCandidateJSON[] | null) || [];
-          const alreadyExists = existing.some(
-            (item) => JSON.stringify(item) === JSON.stringify(candidateData)
-          );
-
-          if (alreadyExists) return;
-
-          const { error: updateError } = await supabase
-            .from("calls")
-            .update({
-              visitor_candidates: [...existing, candidateData],
-            })
-            .eq("id", callId);
-
-          if (updateError) {
-            console.log("Failed to save visitor ICE candidate:", updateError);
-          }
-        };
-
-        const offer = await peer.createOffer();
-        await peer.setLocalDescription(offer);
-
-        if (callId) {
-          const { error: offerError } = await supabase
-            .from("calls")
-            .update({ offer })
-            .eq("id", callId);
-
-          if (offerError) {
-            console.log("Failed to save offer:", offerError);
+          try {
+            await remoteAudioRef.current.play();
+            console.log("Visitor audio playback started");
+          } catch (err) {
+            console.log("Visitor audio play failed:", err);
           }
         }
-      } catch (err: any) {
-        console.log(err);
+      };
 
-        if (!active) return;
+      peer.onicecandidate = async (event) => {
+        if (!event.candidate || !callId) return;
 
+        const candidateData: IceCandidateJSON = {
+          candidate: event.candidate.candidate,
+          sdpMid: event.candidate.sdpMid,
+          sdpMLineIndex: event.candidate.sdpMLineIndex,
+        };
+
+        const { data, error } = await supabase
+          .from("calls")
+          .select("visitor_candidates")
+          .eq("id", callId)
+          .maybeSingle();
+
+        if (error) {
+          console.log("Failed to load visitor candidates:", error);
+          return;
+        }
+
+        const existing =
+          (data?.visitor_candidates as IceCandidateJSON[] | null) || [];
+        const alreadyExists = existing.some(
+          (item) => JSON.stringify(item) === JSON.stringify(candidateData)
+        );
+
+        if (alreadyExists) return;
+
+        const { error: updateError } = await supabase
+          .from("calls")
+          .update({
+            visitor_candidates: [...existing, candidateData],
+          })
+          .eq("id", callId);
+
+        if (updateError) {
+          console.log("Failed to save visitor ICE candidate:", updateError);
+        }
+      };
+
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+
+      const timeoutAt = new Date(Date.now() + 45_000).toISOString();
+
+      const { error: callUpdateError } = await supabase
+        .from("calls")
+        .update({
+          offer,
+          media_mode: mode,
+          expires_at: timeoutAt,
+        })
+        .eq("id", callId);
+
+      if (callUpdateError) {
+        console.log("Failed to save call setup:", callUpdateError);
+        setError("Could not start the call.");
+        setSetupState("fallback");
+        return;
+      }
+
+      setExpiresAt(timeoutAt);
+      setSetupState("ready");
+    } catch (err: any) {
+      console.log(err);
+      stopEverything();
+
+      if (mode === "video") {
+        setSetupState("fallback");
         if (err?.name === "NotAllowedError") {
           setError(
-            "Please allow camera and microphone access so the resident can see and speak to you."
+            "Camera and microphone were not fully available. You can retry video or continue with a voice-only call."
           );
         } else if (err?.name === "NotFoundError") {
-          setError("No camera or microphone was found on this device.");
+          setError(
+            "Camera or microphone was not found. You can continue with a voice-only call if your microphone works."
+          );
         } else {
-          setError("Could not start the camera or microphone.");
+          setError(
+            "Could not start the video call. You can retry or continue with a voice-only call."
+          );
+        }
+      } else {
+        setSetupState("fallback");
+        if (err?.name === "NotAllowedError") {
+          setError(
+            "Microphone permission is needed for a voice-only call."
+          );
+        } else if (err?.name === "NotFoundError") {
+          setError("No microphone was found on this device.");
+        } else {
+          setError("Could not start the voice-only call.");
         }
       }
     }
+  }
 
-    startCallSetup();
+  useEffect(() => {
+    if (!callId) return;
+    startCallSetup("video");
 
     return () => {
-      active = false;
       stopEverything();
     };
   }, [callId]);
@@ -286,7 +335,7 @@ export default function UnitCallPage({
       const { data, error } = await supabase
         .from("calls")
         .select(
-          "id, status, answer, resident_candidates, site_id, unit_id, resident_id"
+          "id, status, answer, resident_candidates, site_id, unit_id, resident_id, expires_at, media_mode"
         )
         .eq("id", callId)
         .maybeSingle();
@@ -303,6 +352,8 @@ export default function UnitCallPage({
       await hydrateCallDetails(callRow);
 
       setStatus(callRow.status);
+      setExpiresAt(callRow.expires_at || null);
+      setMediaMode((callRow.media_mode as MediaMode) || "video");
 
       if (callRow.status === "declined" || callRow.status === "cancelled") {
         stopEverything();
@@ -340,8 +391,14 @@ export default function UnitCallPage({
           filter: `id=eq.${callId}`,
         },
         async (payload) => {
-          const updated = payload.new as CallRowUpdate;
+          const updated = payload.new as CallRowUpdate & {
+            expires_at?: string | null;
+            media_mode?: MediaMode | null;
+          };
+
           setStatus(updated.status);
+          setExpiresAt(updated.expires_at || null);
+          setMediaMode((updated.media_mode as MediaMode) || "video");
 
           if (updated.status === "declined" || updated.status === "cancelled") {
             stopEverything();
@@ -389,6 +446,32 @@ export default function UnitCallPage({
   }, [callId]);
 
   useEffect(() => {
+    if (!expiresAt || !callId) return;
+    if (status !== "calling") return;
+
+    const msRemaining = new Date(expiresAt).getTime() - Date.now();
+
+    if (msRemaining <= 0) {
+      supabase
+        .from("calls")
+        .update({ status: "cancelled" })
+        .eq("id", callId)
+        .eq("status", "calling");
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      supabase
+        .from("calls")
+        .update({ status: "cancelled" })
+        .eq("id", callId)
+        .eq("status", "calling");
+    }, msRemaining);
+
+    return () => clearTimeout(timer);
+  }, [expiresAt, callId, status]);
+
+  useEffect(() => {
     async function syncRemoteAudio() {
       if (!remoteAudioRef.current) return;
 
@@ -419,6 +502,9 @@ export default function UnitCallPage({
 
     stopEverything();
   }
+
+  const isVoiceOnly = mediaMode === "audio_only";
+  const showFallback = setupState === "fallback" && status === "calling";
 
   if (status === "declined") {
     return (
@@ -458,25 +544,43 @@ export default function UnitCallPage({
 
   return (
     <div className="relative min-h-screen bg-black">
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        className="h-screen w-screen object-cover"
-      />
+      {isVoiceOnly ? (
+        <div className="flex h-screen w-screen items-center justify-center text-white text-center px-6">
+          <div>
+            <h1 className="text-3xl font-bold">Voice Call</h1>
+            <p className="mt-3 text-white/80">
+              Your microphone is on. Waiting for {displayName} to answer.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          className="h-screen w-screen object-cover"
+        />
+      )}
+
       <audio ref={remoteAudioRef} autoPlay playsInline />
 
       <div className="absolute inset-0 bg-black/20" />
 
       <div className="absolute top-0 left-0 right-0 p-5 text-white">
         <h1 className="text-2xl font-bold capitalize">
-          {status === "answered" ? "Call in progress" : `Calling ${displayName}`}
+          {status === "answered"
+            ? "Call in progress"
+            : isVoiceOnly
+            ? `Voice calling ${displayName}`
+            : `Calling ${displayName}`}
         </h1>
 
         <p className="mt-1 text-sm text-white/90">
           {status === "answered"
             ? `You are connected to ${displayName}`
+            : isVoiceOnly
+            ? `Waiting for ${displayName} to answer your voice-only call`
             : `Waiting for ${displayName} to answer`}
         </p>
 
@@ -487,28 +591,62 @@ export default function UnitCallPage({
         ) : null}
       </div>
 
-      <div className="absolute bottom-0 left-0 right-0 p-5">
-        <div className="mx-auto flex max-w-sm flex-col gap-3">
-          <div className="w-full rounded-full bg-yellow-500 py-4 text-center text-white font-semibold">
-            {status === "answered" ? "In Call" : "Ringing..."}
+      {showFallback ? (
+        <div className="absolute bottom-0 left-0 right-0 p-5">
+          <div className="mx-auto flex max-w-sm flex-col gap-3">
+            <button
+              type="button"
+              onClick={() => startCallSetup("video")}
+              className="w-full rounded-full bg-black py-4 text-white font-semibold"
+            >
+              Retry Video Call
+            </button>
+
+            <button
+              type="button"
+              onClick={() => startCallSetup("audio_only")}
+              className="w-full rounded-full bg-yellow-500 py-4 text-white font-semibold"
+            >
+              Continue with Voice Only
+            </button>
+
+            <button
+              type="button"
+              onClick={cancelCall}
+              className="w-full rounded-full bg-white py-4 text-black font-semibold"
+            >
+              Cancel Call
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={cancelCall}
-            className="w-full rounded-full bg-red-600 py-4 text-white font-semibold"
-          >
-            {status === "answered" ? "End Call" : "Cancel Call"}
-          </button>
-
-          <Link
-            href={backHref}
-            className="w-full rounded-full bg-white py-4 text-center text-black font-semibold"
-          >
-            Back to Residents
-          </Link>
         </div>
-      </div>
+      ) : (
+        <div className="absolute bottom-0 left-0 right-0 p-5">
+          <div className="mx-auto flex max-w-sm flex-col gap-3">
+            <div className="w-full rounded-full bg-yellow-500 py-4 text-center text-white font-semibold">
+              {status === "answered"
+                ? "In Call"
+                : isVoiceOnly
+                ? "Voice Calling..."
+                : "Ringing..."}
+            </div>
+
+            <button
+              type="button"
+              onClick={cancelCall}
+              className="w-full rounded-full bg-red-600 py-4 text-white font-semibold"
+            >
+              {status === "answered" ? "End Call" : "Cancel Call"}
+            </button>
+
+            <Link
+              href={backHref}
+              className="w-full rounded-full bg-white py-4 text-center text-black font-semibold"
+            >
+              Back to Residents
+            </Link>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,6 +9,8 @@ type IceCandidateJSON = {
   sdpMLineIndex: number | null;
 };
 
+type MediaMode = "video" | "audio_only";
+
 type Resident = {
   id: string;
   slug: string;
@@ -26,6 +28,8 @@ type Call = {
   resident_id?: string | null;
   site_id?: string | null;
   unit_id?: string | null;
+  expires_at?: string | null;
+  media_mode?: MediaMode | null;
 };
 
 export default function ResidentPage({
@@ -315,14 +319,17 @@ export default function ResidentPage({
           console.log("Resident attaching remote stream", remoteStream);
 
           if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteStream;
+            const hasVideo = remoteStream.getVideoTracks().length > 0;
+            remoteVideoRef.current.srcObject = hasVideo ? remoteStream : null;
             remoteVideoRef.current.muted = true;
 
-            try {
-              await remoteVideoRef.current.play();
-              console.log("Resident video playback started");
-            } catch (playError) {
-              console.log("Resident video play() failed:", playError);
+            if (hasVideo) {
+              try {
+                await remoteVideoRef.current.play();
+                console.log("Resident video playback started");
+              } catch (playError) {
+                console.log("Resident video play() failed:", playError);
+              }
             }
           }
 
@@ -417,6 +424,7 @@ export default function ResidentPage({
 
         if (
           incomingCall.status === "calling" &&
+          incomingCall.media_mode !== "audio_only" &&
           previewRetryTimeoutRef.current === null
         ) {
           previewRetryTimeoutRef.current = setTimeout(() => {
@@ -437,7 +445,9 @@ export default function ResidentPage({
         console.log("Failed to prepare resident peer:", err);
 
         if (err?.name === "NotAllowedError") {
-          setAudioError("Please allow microphone access on the resident device.");
+          setAudioError(
+            "Please allow microphone access on the resident device."
+          );
         } else if (err?.name === "NotFoundError") {
           setAudioError("No microphone was found on the resident device.");
         }
@@ -452,7 +462,7 @@ export default function ResidentPage({
         previewRetryTimeoutRef.current = null;
       }
     };
-  }, [incomingCall?.id, incomingCall?.offer, incomingCall?.status]);
+  }, [incomingCall?.id, incomingCall?.offer, incomingCall?.status, incomingCall?.media_mode]);
 
   useEffect(() => {
     async function syncVisitorCandidates() {
@@ -483,6 +493,33 @@ export default function ResidentPage({
 
     syncAnsweredAudio();
   }, [incomingCall?.status]);
+
+  useEffect(() => {
+    if (!incomingCall?.expires_at || !incomingCall?.id) return;
+    if (incomingCall.status !== "calling") return;
+
+    const msRemaining =
+      new Date(incomingCall.expires_at).getTime() - Date.now();
+
+    if (msRemaining <= 0) {
+      supabase
+        .from("calls")
+        .update({ status: "cancelled" })
+        .eq("id", incomingCall.id)
+        .eq("status", "calling");
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      supabase
+        .from("calls")
+        .update({ status: "cancelled" })
+        .eq("id", incomingCall.id)
+        .eq("status", "calling");
+    }, msRemaining);
+
+    return () => clearTimeout(timer);
+  }, [incomingCall?.id, incomingCall?.expires_at, incomingCall?.status]);
 
   async function answerCall() {
     if (!incomingCall) return;
@@ -587,6 +624,8 @@ export default function ResidentPage({
       ? `${unitName} • ${siteName}`
       : unitName || siteName || "Visitor call";
 
+  const isVoiceOnly = incomingCall?.media_mode === "audio_only";
+
   return (
     <div className="min-h-screen bg-gray-100 px-4 py-6">
       <div className="mx-auto w-full max-w-md">
@@ -595,12 +634,23 @@ export default function ResidentPage({
         </h1>
 
         <div className="overflow-hidden rounded-2xl bg-black shadow-lg">
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="h-[420px] w-full object-cover"
-          />
+          {isVoiceOnly ? (
+            <div className="flex h-[420px] items-center justify-center px-6 text-center text-white">
+              <div>
+                <p className="text-2xl font-bold">Voice Call</p>
+                <p className="mt-2 text-white/80">
+                  Visitor is calling without camera access.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className="h-[420px] w-full object-cover"
+            />
+          )}
           <audio ref={remoteAudioRef} autoPlay playsInline />
         </div>
 
@@ -610,7 +660,9 @@ export default function ResidentPage({
           </div>
         ) : incomingCall.status === "calling" ? (
           <div className="mt-4 rounded-2xl bg-white p-6 shadow">
-            <p className="text-center text-lg font-semibold">Incoming Call</p>
+            <p className="text-center text-lg font-semibold">
+              {isVoiceOnly ? "Incoming Voice Call" : "Incoming Call"}
+            </p>
             <p className="mt-2 text-center text-gray-500">
               Visitor is waiting at {locationLine}
             </p>
@@ -623,7 +675,7 @@ export default function ResidentPage({
 
             <div className="mt-6 flex flex-col gap-3">
               <div className="w-full rounded-xl bg-yellow-500 py-4 text-center text-white font-semibold">
-                Ringing...
+                {isVoiceOnly ? "Voice Calling..." : "Ringing..."}
               </div>
 
               <button
