@@ -35,7 +35,6 @@ type CallRow = {
 };
 
 type SetupMode = "video" | "audio_only";
-type SetupState = "idle" | "starting" | "fallback" | "ready";
 
 export default function UnitCallPage({
   params,
@@ -52,6 +51,7 @@ export default function UnitCallPage({
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const answerAppliedRef = useRef(false);
   const addedResidentCandidatesRef = useRef<Set<string>>(new Set());
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fallbackDisplayName = name.charAt(0).toUpperCase() + name.slice(1);
   const fallbackBackHref = `/${siteSlug}/u/${unitSlug}`;
@@ -61,8 +61,25 @@ export default function UnitCallPage({
   const [displayName, setDisplayName] = useState(fallbackDisplayName);
   const [backHref, setBackHref] = useState(fallbackBackHref);
   const [mediaMode, setMediaMode] = useState<MediaMode>("video");
-  const [setupState, setSetupState] = useState<SetupState>("idle");
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [isSettingUp, setIsSettingUp] = useState(false);
+
+  function clearCallTimeout() {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }
+
+  async function forceCancelCallingCall() {
+    if (!callId) return;
+
+    await supabase
+      .from("calls")
+      .update({ status: "cancelled" })
+      .eq("id", callId)
+      .eq("status", "calling");
+  }
 
   function stopEverything() {
     if (peerRef.current) {
@@ -77,6 +94,7 @@ export default function UnitCallPage({
 
     answerAppliedRef.current = false;
     addedResidentCandidatesRef.current = new Set();
+    clearCallTimeout();
 
     if (videoRef.current) {
       videoRef.current.srcObject = null;
@@ -162,11 +180,11 @@ export default function UnitCallPage({
   }
 
   async function startCallSetup(mode: SetupMode) {
-    if (!callId) return;
+    if (!callId || isSettingUp) return;
 
     stopEverything();
     setError("");
-    setSetupState("starting");
+    setIsSettingUp(true);
     setMediaMode(mode);
 
     try {
@@ -271,24 +289,28 @@ export default function UnitCallPage({
           offer,
           media_mode: mode,
           expires_at: timeoutAt,
+          status: "calling",
         })
         .eq("id", callId);
 
       if (callUpdateError) {
         console.log("Failed to save call setup:", callUpdateError);
         setError("Could not start the call.");
-        setSetupState("fallback");
+        setIsSettingUp(false);
         return;
       }
 
       setExpiresAt(timeoutAt);
-      setSetupState("ready");
+
+      clearCallTimeout();
+      timeoutRef.current = setTimeout(() => {
+        forceCancelCallingCall();
+      }, 45_000);
     } catch (err: any) {
       console.log(err);
       stopEverything();
 
       if (mode === "video") {
-        setSetupState("fallback");
         if (err?.name === "NotAllowedError") {
           setError(
             "Camera and microphone were not fully available. You can retry video or continue with a voice-only call."
@@ -303,17 +325,16 @@ export default function UnitCallPage({
           );
         }
       } else {
-        setSetupState("fallback");
         if (err?.name === "NotAllowedError") {
-          setError(
-            "Microphone permission is needed for a voice-only call."
-          );
+          setError("Microphone permission is needed for a voice-only call.");
         } else if (err?.name === "NotFoundError") {
           setError("No microphone was found on this device.");
         } else {
           setError("Could not start the voice-only call.");
         }
       }
+    } finally {
+      setIsSettingUp(false);
     }
   }
 
@@ -391,10 +412,7 @@ export default function UnitCallPage({
           filter: `id=eq.${callId}`,
         },
         async (payload) => {
-          const updated = payload.new as CallRowUpdate & {
-            expires_at?: string | null;
-            media_mode?: MediaMode | null;
-          };
+          const updated = payload.new as CallRowUpdate;
 
           setStatus(updated.status);
           setExpiresAt(updated.expires_at || null);
@@ -452,23 +470,16 @@ export default function UnitCallPage({
     const msRemaining = new Date(expiresAt).getTime() - Date.now();
 
     if (msRemaining <= 0) {
-      supabase
-        .from("calls")
-        .update({ status: "cancelled" })
-        .eq("id", callId)
-        .eq("status", "calling");
+      forceCancelCallingCall();
       return;
     }
 
-    const timer = setTimeout(() => {
-      supabase
-        .from("calls")
-        .update({ status: "cancelled" })
-        .eq("id", callId)
-        .eq("status", "calling");
+    clearCallTimeout();
+    timeoutRef.current = setTimeout(() => {
+      forceCancelCallingCall();
     }, msRemaining);
 
-    return () => clearTimeout(timer);
+    return () => clearCallTimeout();
   }, [expiresAt, callId, status]);
 
   useEffect(() => {
@@ -504,7 +515,8 @@ export default function UnitCallPage({
   }
 
   const isVoiceOnly = mediaMode === "audio_only";
-  const showFallback = setupState === "fallback" && status === "calling";
+  const showFallbackOptions =
+    status === "calling" && !!error && !isSettingUp;
 
   if (status === "declined") {
     return (
@@ -591,7 +603,7 @@ export default function UnitCallPage({
         ) : null}
       </div>
 
-      {showFallback ? (
+      {showFallbackOptions ? (
         <div className="absolute bottom-0 left-0 right-0 p-5">
           <div className="mx-auto flex max-w-sm flex-col gap-3">
             <button
@@ -623,7 +635,9 @@ export default function UnitCallPage({
         <div className="absolute bottom-0 left-0 right-0 p-5">
           <div className="mx-auto flex max-w-sm flex-col gap-3">
             <div className="w-full rounded-full bg-yellow-500 py-4 text-center text-white font-semibold">
-              {status === "answered"
+              {isSettingUp
+                ? "Starting..."
+                : status === "answered"
                 ? "In Call"
                 : isVoiceOnly
                 ? "Voice Calling..."
