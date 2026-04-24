@@ -132,6 +132,25 @@ export default function UnitPage({
     setCallError("");
     setCallingResident(resident.slug);
 
+    const { data: residentStatus, error: statusError } = await supabase
+  .from("residents")
+  .select("availability_status")
+  .eq("id", resident.id)
+  .maybeSingle();
+
+if (statusError) {
+  console.log(statusError);
+  setCallingResident(null);
+  setCallError("Could not check resident availability. Please try again.");
+  return;
+}
+
+if (residentStatus?.availability_status === "dnd") {
+  setCallingResident(null);
+  setCallError("This resident is not available right now.");
+  return;
+}
+
     const { data, error } = await supabase
       .from("calls")
       .insert([

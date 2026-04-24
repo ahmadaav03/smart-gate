@@ -16,6 +16,7 @@ type Resident = {
   slug: string;
   full_name: string;
   display_name: string | null;
+  ringtone: string;
 };
 
 type Call = {
@@ -49,6 +50,7 @@ export default function ResidentPage({
 
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ringtoneRef = useRef<HTMLAudioElement | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -168,7 +170,7 @@ export default function ResidentPage({
     async function loadResident() {
       const { data, error } = await supabase
         .from("residents")
-        .select("id, slug, full_name, display_name")
+        .select("id, slug, full_name, display_name, ringtone")
         .eq("slug", residentSlug)
         .maybeSingle();
 
@@ -524,6 +526,28 @@ export default function ResidentPage({
     return () => clearTimeout(timer);
   }, [incomingCall?.id, incomingCall?.expires_at, incomingCall?.status]);
 
+useEffect(() => {
+  async function handleRingtone() {
+    if (!ringtoneRef.current) return;
+
+    if (incomingCall?.status === "calling") {
+      ringtoneRef.current.currentTime = 0;
+
+      try {
+        await ringtoneRef.current.play();
+        console.log("Ringtone started");
+      } catch (err) {
+        console.log("Ringtone play blocked by browser:", err);
+      }
+    } else {
+      ringtoneRef.current.pause();
+      ringtoneRef.current.currentTime = 0;
+    }
+  }
+
+  handleRingtone();
+}, [incomingCall?.status]);
+
   async function answerCall() {
     if (!incomingCall) return;
 
@@ -663,6 +687,11 @@ export default function ResidentPage({
 
       {/* AUDIO */}
       <audio ref={remoteAudioRef} autoPlay playsInline />
+      <audio
+  ref={ringtoneRef}
+  src={`/ringtones/${resident?.ringtone || "classic"}.mp3`}
+  loop
+/>
 
       {/* CONNECTING OVERLAY */}
       {incomingCall?.status === "calling" &&
