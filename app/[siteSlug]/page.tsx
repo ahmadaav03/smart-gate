@@ -1,22 +1,18 @@
 "use client";
 
-import Link from "next/link";
 import { use, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 type Site = {
   id: string;
-  slug: string;
   name: string;
-  site_type: string;
+  slug: string;
 };
 
 type Unit = {
   id: string;
-  slug: string;
   name: string;
-  unit_type: string;
+  slug: string;
 };
 
 export default function SitePage({
@@ -25,132 +21,146 @@ export default function SitePage({
   params: Promise<{ siteSlug: string }>;
 }) {
   const { siteSlug } = use(params);
-  const router = useRouter();
 
   const [site, setSite] = useState<Site | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const [unitInput, setUnitInput] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    let active = true;
-
     async function loadSiteAndUnits() {
-      setLoading(true);
-      setNotFound(false);
-
-      const { data: siteData, error: siteError } = await supabase
+      const { data: siteData } = await supabase
         .from("sites")
-        .select("id, slug, name, site_type")
+        .select("id, name, slug")
         .eq("slug", siteSlug)
         .maybeSingle();
 
-      if (siteError) {
-        console.log(siteError);
-        if (active) {
-          setLoading(false);
-          setNotFound(true);
-        }
-        return;
-      }
-
       if (!siteData) {
-        if (active) {
-          setLoading(false);
-          setNotFound(true);
-        }
+        setError("Site not found.");
         return;
       }
-
-      const { data: unitData, error: unitError } = await supabase
-        .from("units")
-        .select("id, slug, name, unit_type")
-        .eq("site_id", siteData.id)
-        .eq("is_active", true)
-        .order("name", { ascending: true });
-
-      if (unitError) {
-        console.log(unitError);
-        if (active) {
-          setLoading(false);
-          setNotFound(true);
-        }
-        return;
-      }
-
-      if (!active) return;
 
       setSite(siteData as Site);
-      setUnits((unitData as Unit[]) || []);
-      setLoading(false);
 
-      if (unitData && unitData.length === 1) {
-        router.replace(`/${siteSlug}/u/${unitData[0].slug}`);
-      }
+      const { data: unitsData } = await supabase
+        .from("units")
+        .select("id, name, slug")
+        .eq("site_id", siteData.id)
+        .order("name", { ascending: true });
+
+      setUnits((unitsData as Unit[]) || []);
     }
 
     loadSiteAndUnits();
+  }, [siteSlug]);
 
-    return () => {
-      active = false;
-    };
-  }, [siteSlug, router]);
+  function goToUnit() {
+    const cleaned = unitInput.trim().toLowerCase();
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">Loading...</h1>
-          <p className="mt-2 text-gray-500">Please wait</p>
-        </div>
-      </div>
+    if (!cleaned) {
+      setError("Enter a unit number or select one below.");
+      return;
+    }
+
+    const matchedUnit = units.find(
+      (unit) =>
+        unit.slug.toLowerCase() === cleaned ||
+        unit.name.toLowerCase() === cleaned
     );
+
+    if (!matchedUnit) {
+      setError("Unit not found. Check the unit number and try again.");
+      return;
+    }
+
+    window.location.href = `/${siteSlug}/u/${matchedUnit.slug}`;
   }
 
-  if (notFound || !site) {
+  if (error && !site) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold">Location not found</h1>
-          <p className="mt-2 text-gray-500">
-            We could not find this property.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (units.length === 0) {
-    return (
-      <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold">{site.name}</h1>
-          <p className="mt-2 text-gray-500">
-            No units are available for this property yet.
-          </p>
+      <div className="min-h-screen bg-[#0B1F3A] text-white flex items-center justify-center px-6 text-center">
+        <div>
+          <h1 className="text-2xl font-bold">Site not found</h1>
+          <p className="mt-3 text-white/70">{error}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-4">
-      <h1 className="text-3xl font-bold text-center">{site.name}</h1>
+    <div className="min-h-screen bg-[#0B1F3A] text-white px-5 py-8">
+      <div className="mx-auto max-w-md">
+        <div className="text-center">
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-white/10 text-3xl">
+            🛡️
+          </div>
 
-      <p className="text-center text-gray-500">
-        Choose the unit you want to contact
-      </p>
+          <h1 className="text-3xl font-bold">
+            {site?.name || "Loading..."}
+          </h1>
 
-      <div className="flex w-full max-w-xs flex-col gap-4">
-        {units.map((unit) => (
-          <Link
-            key={unit.id}
-            href={`/${siteSlug}/u/${unit.slug}`}
-            className="rounded-lg bg-black py-3 text-center text-white"
+          <p className="mt-3 text-sm text-white/70">
+            Enter or select the unit you want to contact.
+          </p>
+        </div>
+
+        <div className="mt-8 rounded-3xl bg-white p-5 text-black shadow-2xl">
+          <label className="text-sm font-semibold text-gray-700">
+            Unit number
+          </label>
+
+          <input
+            value={unitInput}
+            onChange={(e) => {
+              setUnitInput(e.target.value);
+              setError("");
+            }}
+            placeholder="e.g. 12 or A4"
+            className="mt-2 w-full rounded-2xl border border-gray-200 px-4 py-4 text-lg outline-none focus:border-[#0B1F3A]"
+          />
+
+          {error ? (
+            <p className="mt-3 text-sm text-red-600">{error}</p>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={goToUnit}
+            className="mt-4 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white active:scale-95 transition"
           >
-            {unit.name}
-          </Link>
-        ))}
+            Continue
+          </button>
+        </div>
+
+        <div className="mt-7">
+          <p className="mb-3 text-sm font-semibold text-white/80">
+            Available units
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            {units.map((unit) => (
+              <button
+                key={unit.id}
+                type="button"
+                onClick={() => {
+                  window.location.href = `/${siteSlug}/u/${unit.slug}`;
+                }}
+                className="rounded-2xl bg-white/10 px-4 py-4 text-left active:scale-95 transition"
+              >
+                <p className="font-semibold">{unit.name}</p>
+                <p className="mt-1 text-xs text-white/60">
+                  Tap to select
+                </p>
+              </button>
+            ))}
+          </div>
+
+          {units.length === 0 ? (
+            <p className="mt-4 text-sm text-white/60 text-center">
+              No units found for this site.
+            </p>
+          ) : null}
+        </div>
       </div>
     </div>
   );
