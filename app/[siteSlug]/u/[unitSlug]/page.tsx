@@ -13,12 +13,14 @@ type Unit = {
   id: string;
   slug: string;
   name: string;
+  display_name: string | null;
 };
 
 type Resident = {
   id: string;
   slug: string;
   full_name: string;
+  display_name: string | null;
 };
 
 export default function UnitPage({
@@ -35,6 +37,14 @@ export default function UnitPage({
   const [notFound, setNotFound] = useState(false);
   const [callingResident, setCallingResident] = useState<string | null>(null);
   const [callError, setCallError] = useState("");
+
+  function getUnitDisplayName(unit: Unit) {
+    return unit.display_name || unit.name;
+  }
+
+  function getResidentDisplayName(resident: Resident) {
+    return resident.display_name || resident.full_name;
+  }
 
   useEffect(() => {
     let active = true;
@@ -60,7 +70,7 @@ export default function UnitPage({
 
       const { data: unitData, error: unitError } = await supabase
         .from("units")
-        .select("id, slug, name")
+        .select("id, slug, name, display_name")
         .eq("site_id", siteData.id)
         .eq("slug", unitSlug)
         .maybeSingle();
@@ -80,7 +90,8 @@ export default function UnitPage({
           residents (
             id,
             slug,
-            full_name
+            full_name,
+            display_name
           )
         `)
         .eq("unit_id", unitData.id)
@@ -165,19 +176,19 @@ export default function UnitPage({
       <div className="min-h-screen bg-[#0B1F3A] text-white flex items-center justify-center px-6 text-center">
         <div>
           <h1 className="text-3xl font-bold">Unit not found</h1>
-          <p className="mt-3 text-white/70">
-            We could not find this unit.
-          </p>
+          <p className="mt-3 text-white/70">We could not find this unit.</p>
         </div>
       </div>
     );
   }
 
+  const unitDisplayName = getUnitDisplayName(unit);
+
   if (residents.length === 0) {
     return (
       <div className="min-h-screen bg-[#0B1F3A] text-white flex items-center justify-center px-6 text-center">
         <div>
-          <h1 className="text-3xl font-bold">{unit.name}</h1>
+          <h1 className="text-3xl font-bold">{unitDisplayName}</h1>
           <p className="mt-3 text-white/70">
             No residents are available for this unit yet.
           </p>
@@ -196,7 +207,11 @@ export default function UnitPage({
 
           <p className="text-sm text-white/60">{site.name}</p>
 
-          <h1 className="mt-2 text-3xl font-bold">{unit.name}</h1>
+          <h1 className="mt-2 text-3xl font-bold">{unitDisplayName}</h1>
+
+          {unit.display_name && unit.display_name !== unit.name ? (
+            <p className="mt-1 text-xs text-white/50">{unit.name}</p>
+          ) : null}
 
           <p className="mt-3 text-sm text-white/70">
             Select who you would like to contact.
@@ -212,6 +227,7 @@ export default function UnitPage({
         <div className="mt-8 flex flex-col gap-4">
           {residents.map((resident) => {
             const isCalling = callingResident === resident.slug;
+            const residentDisplayName = getResidentDisplayName(resident);
 
             return (
               <button
@@ -227,9 +243,7 @@ export default function UnitPage({
                   </div>
 
                   <div className="flex-1">
-                    <p className="text-lg font-bold">
-                      {resident.full_name}
-                    </p>
+                    <p className="text-lg font-bold">{residentDisplayName}</p>
                     <p className="mt-1 text-sm text-gray-500">
                       {isCalling ? "Starting call..." : "Tap to call resident"}
                     </p>

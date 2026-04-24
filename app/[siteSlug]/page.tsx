@@ -12,6 +12,7 @@ type Site = {
 type Unit = {
   id: string;
   name: string;
+  display_name: string | null;
   slug: string;
 };
 
@@ -44,7 +45,7 @@ export default function SitePage({
 
       const { data: unitsData } = await supabase
         .from("units")
-        .select("id, name, slug")
+        .select("id, name, display_name, slug")
         .eq("site_id", siteData.id)
         .order("name", { ascending: true });
 
@@ -54,6 +55,10 @@ export default function SitePage({
     loadSiteAndUnits();
   }, [siteSlug]);
 
+  function getUnitDisplayName(unit: Unit) {
+    return unit.display_name || unit.name;
+  }
+
   function goToUnit() {
     const cleaned = unitInput.trim().toLowerCase();
 
@@ -62,14 +67,18 @@ export default function SitePage({
       return;
     }
 
-    const matchedUnit = units.find(
-      (unit) =>
+    const matchedUnit = units.find((unit) => {
+      const displayName = getUnitDisplayName(unit).toLowerCase();
+
+      return (
         unit.slug.toLowerCase() === cleaned ||
-        unit.name.toLowerCase() === cleaned
-    );
+        unit.name.toLowerCase() === cleaned ||
+        displayName === cleaned
+      );
+    });
 
     if (!matchedUnit) {
-      setError("Unit not found. Check the unit number and try again.");
+      setError("Unit not found. Check the unit name or number and try again.");
       return;
     }
 
@@ -95,9 +104,7 @@ export default function SitePage({
             🛡️
           </div>
 
-          <h1 className="text-3xl font-bold">
-            {site?.name || "Loading..."}
-          </h1>
+          <h1 className="text-3xl font-bold">{site?.name || "Loading..."}</h1>
 
           <p className="mt-3 text-sm text-white/70">
             Enter or select the unit you want to contact.
@@ -106,7 +113,7 @@ export default function SitePage({
 
         <div className="mt-8 rounded-3xl bg-white p-5 text-black shadow-2xl">
           <label className="text-sm font-semibold text-gray-700">
-            Unit number
+            Unit name or number
           </label>
 
           <input
@@ -115,13 +122,11 @@ export default function SitePage({
               setUnitInput(e.target.value);
               setError("");
             }}
-            placeholder="e.g. 12 or A4"
+            placeholder="e.g. 12, A4, or Deer Residence"
             className="mt-2 w-full rounded-2xl border border-gray-200 px-4 py-4 text-lg outline-none focus:border-[#0B1F3A]"
           />
 
-          {error ? (
-            <p className="mt-3 text-sm text-red-600">{error}</p>
-          ) : null}
+          {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
 
           <button
             type="button"
@@ -147,10 +152,12 @@ export default function SitePage({
                 }}
                 className="rounded-2xl bg-white/10 px-4 py-4 text-left active:scale-95 transition"
               >
-                <p className="font-semibold">{unit.name}</p>
-                <p className="mt-1 text-xs text-white/60">
-                  Tap to select
-                </p>
+                <p className="font-semibold">{getUnitDisplayName(unit)}</p>
+                {unit.display_name && unit.display_name !== unit.name ? (
+                  <p className="mt-1 text-xs text-white/50">{unit.name}</p>
+                ) : (
+                  <p className="mt-1 text-xs text-white/60">Tap to select</p>
+                )}
               </button>
             ))}
           </div>

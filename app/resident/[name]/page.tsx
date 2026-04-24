@@ -15,6 +15,7 @@ type Resident = {
   id: string;
   slug: string;
   full_name: string;
+  display_name: string | null;
 };
 
 type Call = {
@@ -58,7 +59,9 @@ export default function ResidentPage({
   );
 
   const displayName =
-    resident?.full_name || name.charAt(0).toUpperCase() + name.slice(1);
+  resident?.display_name ||
+  resident?.full_name ||
+  name.charAt(0).toUpperCase() + name.slice(1);
 
   function stopPeer() {
     if (peerRef.current) {
@@ -126,7 +129,7 @@ export default function ResidentPage({
       if (call.site_id) {
         const { data: siteData, error: siteError } = await supabase
           .from("sites")
-          .select("name")
+          .select("name, display_name")
           .eq("id", call.site_id)
           .maybeSingle();
 
@@ -142,12 +145,12 @@ export default function ResidentPage({
       if (call.unit_id) {
         const { data: unitData, error: unitError } = await supabase
           .from("units")
-          .select("name")
+          .select("name, display_name")
           .eq("id", call.unit_id)
           .maybeSingle();
 
         if (!unitError && unitData?.name) {
-          setUnitName(unitData.name);
+  setUnitName(unitData.display_name || unitData.name);
         } else {
           setUnitName("");
         }
@@ -165,7 +168,7 @@ export default function ResidentPage({
     async function loadResident() {
       const { data, error } = await supabase
         .from("residents")
-        .select("id, slug, full_name")
+        .select("id, slug, full_name, display_name")
         .eq("slug", residentSlug)
         .maybeSingle();
 

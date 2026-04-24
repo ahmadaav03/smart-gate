@@ -136,13 +136,13 @@ export default function UnitCallPage({
       if (callRow.resident_id) {
         const { data: residentData, error: residentError } = await supabase
           .from("residents")
-          .select("full_name")
+          .select("full_name, display_name")
           .eq("id", callRow.resident_id)
           .maybeSingle();
 
-        if (!residentError && residentData?.full_name) {
-          setDisplayName(residentData.full_name);
-        }
+        if (!residentError && residentData) {
+  setDisplayName(residentData.display_name || residentData.full_name);
+}
       }
 
       let resolvedSiteSlug: string | null = null;
