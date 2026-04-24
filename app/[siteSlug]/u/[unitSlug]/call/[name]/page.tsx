@@ -561,66 +561,83 @@ export default function UnitCallPage({
   }
 
   return (
-    <div className="relative min-h-screen bg-black">
-      {isVoiceOnly ? (
-        <div className="flex h-screen w-screen items-center justify-center text-white text-center px-6">
-          <div>
-            <h1 className="text-3xl font-bold">Voice Call</h1>
-            <p className="mt-3 text-white/80">
-              Your microphone is on. Waiting for {displayName} to answer.
-            </p>
+  <div className="relative min-h-screen bg-[#0B1F3A] text-white overflow-hidden">
+    {/* MAIN MEDIA AREA */}
+    {isVoiceOnly ? (
+      <div className="flex h-screen w-screen items-center justify-center px-6 text-center">
+        <div>
+          <div className="mx-auto mb-5 flex h-24 w-24 items-center justify-center rounded-full bg-white/10 text-4xl">
+            🎙️
           </div>
-        </div>
-      ) : (
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          className="h-screen w-screen object-cover"
-        />
-      )}
-
-      <audio ref={remoteAudioRef} autoPlay playsInline />
-
-      <div className="absolute inset-0 bg-black/20" />
-
-      <div className="absolute top-0 left-0 right-0 p-5 text-white">
-        <h1 className="text-2xl font-bold capitalize">
-          {status === "answered"
-            ? "Call in progress"
-            : isVoiceOnly
-            ? `Voice calling ${displayName}`
-            : `Calling ${displayName}`}
-        </h1>
-
-        <p className="mt-1 text-sm text-white/90">
-          {status === "answered"
-            ? `You are connected to ${displayName}`
-            : isVoiceOnly
-            ? `Waiting for ${displayName} to answer your voice-only call`
-            : `Waiting for ${displayName} to answer`}
-        </p>
-
-        {error ? (
-          <p className="mt-3 rounded-xl bg-red-600/90 px-3 py-3 text-sm">
-            {error}
+          <h1 className="text-3xl font-bold">Voice Call</h1>
+          <p className="mt-3 text-white/75">
+            Waiting for {displayName} to answer.
           </p>
-        ) : null}
+        </div>
       </div>
+    ) : (
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        className="h-screen w-screen object-cover opacity-0 transition-opacity duration-500"
+        onLoadedData={(e) => {
+          (e.target as HTMLVideoElement).style.opacity = "1";
+        }}
+      />
+    )}
 
-      {showFallbackOptions ? (
-        <div className="absolute bottom-0 left-0 right-0 p-5">
-          <div className="mx-auto flex max-w-sm flex-col gap-3 rounded-2xl bg-white/95 p-4 shadow-lg">
-            <p className="text-center text-sm text-gray-700">
-              If you denied access by mistake, allow camera and microphone in
-              your browser or site settings, then try again.
-            </p>
+    <audio ref={remoteAudioRef} autoPlay playsInline />
 
+    {/* DARK OVERLAY */}
+    <div className="absolute inset-0 bg-black/35" />
+
+    {/* TOP STATUS */}
+    <div className="absolute top-0 left-0 right-0 p-6 text-center">
+      <h1 className="text-2xl font-bold">
+        {status === "answered"
+          ? "Call in progress"
+          : isVoiceOnly
+          ? `Voice calling ${displayName}`
+          : `Calling ${displayName}`}
+      </h1>
+
+      <p className="mt-2 text-sm text-white/80">
+        {isSettingUp
+          ? "Starting call..."
+          : status === "answered"
+          ? `You are connected to ${displayName}`
+          : isVoiceOnly
+          ? "Voice-only call active"
+          : "Waiting for resident to answer"}
+      </p>
+
+      {error ? (
+        <p className="mx-auto mt-4 max-w-sm rounded-xl bg-red-600/90 px-4 py-3 text-sm">
+          {error}
+        </p>
+      ) : null}
+    </div>
+
+    {/* FALLBACK PERMISSION CARD */}
+    {showFallbackOptions ? (
+      <div className="absolute bottom-0 left-0 right-0 p-5">
+        <div className="mx-auto max-w-sm rounded-3xl bg-white p-5 text-black shadow-2xl">
+          <h2 className="text-center text-lg font-bold">
+            Camera or mic access needed
+          </h2>
+
+          <p className="mt-2 text-center text-sm text-gray-600">
+            If you denied access by mistake, allow camera and microphone in your
+            browser settings, then try again.
+          </p>
+
+          <div className="mt-5 flex flex-col gap-3">
             <button
               type="button"
               onClick={() => startCallSetup("video")}
-              className="w-full rounded-full bg-black py-4 text-white font-semibold"
+              className="w-full rounded-full bg-[#0B1F3A] py-4 text-white font-semibold active:scale-95 transition"
             >
               I Allowed Permission — Try Video Again
             </button>
@@ -628,7 +645,7 @@ export default function UnitCallPage({
             <button
               type="button"
               onClick={() => startCallSetup("audio_only")}
-              className="w-full rounded-full bg-yellow-500 py-4 text-white font-semibold"
+              className="w-full rounded-full bg-[#F59E0B] py-4 text-white font-semibold active:scale-95 transition"
             >
               Continue with Voice Only
             </button>
@@ -636,16 +653,14 @@ export default function UnitCallPage({
             <button
               type="button"
               onClick={() => setShowPermissionHelp((value) => !value)}
-              className="w-full rounded-full bg-white py-4 text-black font-semibold border"
+              className="w-full rounded-full border border-gray-300 bg-white py-4 text-black font-semibold active:scale-95 transition"
             >
               {showPermissionHelp ? "Hide Help" : "How to Allow Camera/Mic"}
             </button>
 
             {showPermissionHelp ? (
-              <div className="rounded-xl bg-gray-100 px-4 py-3 text-sm text-gray-700">
-                <p className="font-semibold text-gray-900">
-                  How to fix access
-                </p>
+              <div className="rounded-2xl bg-gray-100 px-4 py-3 text-sm text-gray-700">
+                <p className="font-semibold text-gray-900">How to fix access</p>
                 <p className="mt-2">
                   1. Tap the lock, info, or site settings icon near your browser
                   address bar.
@@ -661,42 +676,51 @@ export default function UnitCallPage({
             <button
               type="button"
               onClick={cancelCall}
-              className="w-full rounded-full bg-red-600 py-4 text-white font-semibold"
+              className="w-full rounded-full bg-red-600 py-4 text-white font-semibold active:scale-95 transition"
             >
               Cancel Call
             </button>
           </div>
         </div>
-      ) : (
-        <div className="absolute bottom-0 left-0 right-0 p-5">
-          <div className="mx-auto flex max-w-sm flex-col gap-3">
-            <div className="w-full rounded-full bg-yellow-500 py-4 text-center text-white font-semibold">
-              {isSettingUp
-                ? "Starting..."
-                : status === "answered"
-                ? "In Call"
-                : isVoiceOnly
-                ? "Voice Calling..."
-                : "Ringing..."}
-            </div>
+      </div>
+    ) : (
+      /* CALL CONTROLS */
+      <div className="absolute bottom-0 left-0 right-0 p-6">
+        <div className="mx-auto flex max-w-sm flex-col items-center gap-5">
+          <div className="rounded-full bg-[#F59E0B] px-6 py-3 text-sm font-semibold shadow-lg">
+            {isSettingUp
+              ? "Starting..."
+              : status === "answered"
+              ? "In Call"
+              : isVoiceOnly
+              ? "Voice Calling..."
+              : "Ringing..."}
+          </div>
 
+          <div className="flex gap-8">
             <button
               type="button"
               onClick={cancelCall}
-              className="w-full rounded-full bg-red-600 py-4 text-white font-semibold"
+              className="flex flex-col items-center"
             >
-              {status === "answered" ? "End Call" : "Cancel Call"}
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg active:scale-95 transition">
+                ✖
+              </div>
+              <span className="mt-2 text-xs">
+                {status === "answered" ? "End" : "Cancel"}
+              </span>
             </button>
 
-            <Link
-              href={backHref}
-              className="w-full rounded-full bg-white py-4 text-center text-black font-semibold"
-            >
-              Back to Residents
+            <Link href={backHref} className="flex flex-col items-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-xl text-black shadow-lg active:scale-95 transition">
+                ←
+              </div>
+              <span className="mt-2 text-xs">Back</span>
             </Link>
           </div>
         </div>
-      )}
-    </div>
-  );
+      </div>
+    )}
+  </div>
+);
 }
