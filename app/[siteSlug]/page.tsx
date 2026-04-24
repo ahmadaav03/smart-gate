@@ -44,12 +44,19 @@ export default function SitePage({
       setSite(siteData as Site);
 
       const { data: unitsData } = await supabase
-        .from("units")
-        .select("id, name, display_name, slug")
-        .eq("site_id", siteData.id)
-        .order("name", { ascending: true });
+  .from("units")
+  .select("id, name, display_name, slug")
+  .eq("site_id", siteData.id)
+  .order("name", { ascending: true });
 
-      setUnits((unitsData as Unit[]) || []);
+const unitList = (unitsData as Unit[]) || [];
+
+if (unitList.length === 1) {
+  window.location.href = `/${siteSlug}/u/${unitList[0].slug}`;
+  return;
+}
+
+setUnits(unitList);
     }
 
     loadSiteAndUnits();
