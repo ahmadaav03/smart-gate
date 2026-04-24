@@ -34,6 +34,7 @@ export default function UnitPage({
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [callingResident, setCallingResident] = useState<string | null>(null);
+  const [callError, setCallError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -115,8 +116,9 @@ export default function UnitPage({
   }, [siteSlug, unitSlug]);
 
   async function createCall(resident: Resident) {
-    if (!unit) return;
+    if (!site || !unit) return;
 
+    setCallError("");
     setCallingResident(resident.slug);
 
     const { data, error } = await supabase
@@ -126,7 +128,7 @@ export default function UnitPage({
           house_slug: siteSlug,
           resident_slug: resident.slug,
           status: "calling",
-          site_id: site?.id ?? null,
+          site_id: site.id,
           unit_id: unit.id,
           resident_id: resident.id,
         },
@@ -137,6 +139,9 @@ export default function UnitPage({
     if (error || !data) {
       console.log(error);
       setCallingResident(null);
+      setCallError(
+        "This resident may already be on a call. Please try again shortly."
+      );
       return;
     }
 
@@ -145,10 +150,11 @@ export default function UnitPage({
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">Loading...</h1>
-          <p className="mt-2 text-gray-500">Please wait</p>
+      <div className="min-h-screen bg-[#0B1F3A] text-white flex items-center justify-center px-6 text-center">
+        <div>
+          <div className="mx-auto mb-5 h-14 w-14 animate-pulse rounded-full bg-white/10" />
+          <h1 className="text-2xl font-bold">Loading</h1>
+          <p className="mt-2 text-white/70">Preparing unit details...</p>
         </div>
       </div>
     );
@@ -156,10 +162,10 @@ export default function UnitPage({
 
   if (notFound || !site || !unit) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="text-center">
+      <div className="min-h-screen bg-[#0B1F3A] text-white flex items-center justify-center px-6 text-center">
+        <div>
           <h1 className="text-3xl font-bold">Unit not found</h1>
-          <p className="mt-2 text-gray-500">
+          <p className="mt-3 text-white/70">
             We could not find this unit.
           </p>
         </div>
@@ -169,10 +175,10 @@ export default function UnitPage({
 
   if (residents.length === 0) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="text-center">
+      <div className="min-h-screen bg-[#0B1F3A] text-white flex items-center justify-center px-6 text-center">
+        <div>
           <h1 className="text-3xl font-bold">{unit.name}</h1>
-          <p className="mt-2 text-gray-500">
+          <p className="mt-3 text-white/70">
             No residents are available for this unit yet.
           </p>
         </div>
@@ -181,27 +187,72 @@ export default function UnitPage({
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-4">
-      <h1 className="text-3xl font-bold text-center">{unit.name}</h1>
+    <div className="min-h-screen bg-[#0B1F3A] text-white px-5 py-8">
+      <div className="mx-auto max-w-md">
+        <div className="text-center">
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-white/10 text-3xl">
+            🏠
+          </div>
 
-      <p className="text-center text-gray-500">
-        Who would you like to contact?
-      </p>
+          <p className="text-sm text-white/60">{site.name}</p>
 
-      <div className="flex w-full max-w-xs flex-col gap-4">
-        {residents.map((resident) => (
-          <button
-            key={resident.id}
-            type="button"
-            onClick={() => createCall(resident)}
-            disabled={callingResident === resident.slug}
-            className="rounded-lg bg-black py-3 text-white"
-          >
-            {callingResident === resident.slug
-              ? "Calling..."
-              : `Call ${resident.full_name}`}
-          </button>
-        ))}
+          <h1 className="mt-2 text-3xl font-bold">{unit.name}</h1>
+
+          <p className="mt-3 text-sm text-white/70">
+            Select who you would like to contact.
+          </p>
+        </div>
+
+        {callError ? (
+          <div className="mt-6 rounded-2xl bg-red-600/90 px-4 py-3 text-center text-sm text-white">
+            {callError}
+          </div>
+        ) : null}
+
+        <div className="mt-8 flex flex-col gap-4">
+          {residents.map((resident) => {
+            const isCalling = callingResident === resident.slug;
+
+            return (
+              <button
+                key={resident.id}
+                type="button"
+                onClick={() => createCall(resident)}
+                disabled={!!callingResident}
+                className="group rounded-3xl bg-white p-5 text-left text-black shadow-xl active:scale-95 transition disabled:opacity-70"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#0B1F3A] text-xl text-white">
+                    {isCalling ? "…" : "📞"}
+                  </div>
+
+                  <div className="flex-1">
+                    <p className="text-lg font-bold">
+                      {resident.full_name}
+                    </p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      {isCalling ? "Starting call..." : "Tap to call resident"}
+                    </p>
+                  </div>
+
+                  <div className="text-2xl text-gray-300 group-active:translate-x-1 transition">
+                    →
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            window.location.href = `/${siteSlug}`;
+          }}
+          className="mt-8 w-full rounded-full bg-white/10 py-4 text-sm font-semibold text-white active:scale-95 transition"
+        >
+          Back to units
+        </button>
       </div>
     </div>
   );
