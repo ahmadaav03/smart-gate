@@ -627,138 +627,114 @@ export default function ResidentPage({
   const isVoiceOnly = incomingCall?.media_mode === "audio_only";
 
   return (
-    <div className="min-h-screen bg-gray-100 px-4 py-6">
-      <div className="mx-auto w-full max-w-md">
-        <h1 className="mb-4 text-center text-2xl font-bold capitalize">
-          {displayName}&apos;s Phone
-        </h1>
+  <div className="min-h-screen bg-[#0B1F3A] text-white flex flex-col">
 
-        <div className="overflow-hidden rounded-2xl bg-black shadow-lg">
-          {isVoiceOnly ? (
-            <div className="flex h-[420px] items-center justify-center px-6 text-center text-white">
-              <div>
-                <p className="text-2xl font-bold">Voice Call</p>
-                <p className="mt-2 text-white/80">
-                  Visitor is calling without camera access.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <video
-              ref={remoteVideoRef}
-              autoPlay
-              playsInline
-              className="h-[420px] w-full object-cover"
-            />
-          )}
-          <audio ref={remoteAudioRef} autoPlay playsInline />
-        </div>
+    {/* HEADER */}
+    <div className="pt-6 pb-2 text-center">
+      <h1 className="text-xl font-semibold">{displayName}</h1>
 
-        {!incomingCall ? (
-          <div className="mt-4 rounded-2xl bg-white p-6 text-center shadow">
-            <p className="text-gray-500">No incoming calls</p>
-          </div>
-        ) : incomingCall.status === "calling" ? (
-          <div className="mt-4 rounded-2xl bg-white p-6 shadow">
-            <p className="text-center text-lg font-semibold">
-              {isVoiceOnly ? "Incoming Voice Call" : "Incoming Call"}
-            </p>
-            <p className="mt-2 text-center text-gray-500">
-              Visitor is waiting at {locationLine}
-            </p>
+      <p className="text-sm text-white/70 mt-1">
+        {!incomingCall
+          ? "Waiting for calls"
+          : incomingCall.status === "calling"
+          ? "Incoming call..."
+          : incomingCall.status === "answered"
+          ? "Call in progress"
+          : "Call ended"}
+      </p>
+    </div>
 
-            {audioError ? (
-              <p className="mt-4 rounded-xl bg-red-100 px-4 py-3 text-center text-sm text-red-700">
-                {audioError}
-              </p>
-            ) : null}
+    {/* VIDEO AREA */}
+    <div className="flex-1 relative flex items-center justify-center px-4">
 
-            <div className="mt-6 flex flex-col gap-3">
-              <div className="w-full rounded-xl bg-yellow-500 py-4 text-center text-white font-semibold">
-                {isVoiceOnly ? "Voice Calling..." : "Ringing..."}
-              </div>
+      {/* VIDEO */}
+      <video
+        ref={remoteVideoRef}
+        autoPlay
+        playsInline
+        className="w-full max-w-md rounded-2xl object-cover opacity-0 transition-opacity duration-500"
+        onLoadedData={(e) => {
+          (e.target as HTMLVideoElement).style.opacity = "1";
+        }}
+      />
 
-              <button
-                onClick={answerCall}
-                className="w-full rounded-xl bg-green-600 py-4 text-white font-semibold"
-              >
-                Answer Call
-              </button>
+      {/* AUDIO */}
+      <audio ref={remoteAudioRef} autoPlay playsInline />
 
-              <button
-                onClick={declineCall}
-                className="w-full rounded-xl bg-red-600 py-4 text-white font-semibold"
-              >
-                Decline Call
-              </button>
-            </div>
-          </div>
-        ) : incomingCall.status === "answered" ? (
-          <div className="mt-4 rounded-2xl bg-white p-6 shadow">
-            <p className="text-center text-lg font-semibold text-green-600">
-              Call in progress
-            </p>
-            <p className="mt-2 text-center text-gray-500">
-              You are connected to the visitor at {locationLine}
-            </p>
-
-            {audioError ? (
-              <p className="mt-4 rounded-xl bg-red-100 px-4 py-3 text-center text-sm text-red-700">
-                {audioError}
-              </p>
-            ) : null}
-
-            <div className="mt-6 flex flex-col gap-3">
-              <div className="w-full rounded-xl bg-green-600 py-4 text-center text-white font-semibold">
-                In Call
-              </div>
-
-              <button
-                onClick={endCall}
-                className="w-full rounded-xl bg-red-600 py-4 text-white font-semibold"
-              >
-                End Call
-              </button>
-            </div>
-          </div>
-        ) : incomingCall.status === "declined" ? (
-          <div className="mt-4 rounded-2xl bg-white p-6 shadow">
-            <p className="text-center text-lg font-semibold text-red-600">
-              Call Declined
-            </p>
-            <p className="mt-2 text-center text-gray-500">
-              You declined the incoming call.
-            </p>
-
-            <div className="mt-6">
-              <button
-                onClick={clearCall}
-                className="w-full rounded-xl bg-gray-300 py-4 text-black font-semibold"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4 rounded-2xl bg-white p-6 shadow">
-            <p className="text-center text-lg font-semibold text-gray-700">
-              Call Ended
-            </p>
-            <p className="mt-2 text-center text-gray-500">
-              The call has been cancelled or ended.
-            </p>
-
-            <div className="mt-6">
-              <button
-                onClick={clearCall}
-                className="w-full rounded-xl bg-gray-300 py-4 text-black font-semibold"
-              >
-                Clear
-              </button>
+      {/* CONNECTING OVERLAY */}
+      {incomingCall?.status === "calling" &&
+        !remoteVideoRef.current?.srcObject && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="bg-black/50 px-5 py-3 rounded-xl text-sm">
+              Connecting to visitor...
             </div>
           </div>
         )}
-      </div>
     </div>
-  );
+
+    {/* CONTROLS */}
+    <div className="pb-8 pt-4 flex flex-col items-center gap-4">
+
+      {!incomingCall && (
+        <div className="text-white/50 text-sm">No incoming calls</div>
+      )}
+
+      {incomingCall?.status === "calling" && (
+        <div className="flex gap-6">
+
+          {/* ANSWER */}
+          <button
+            onClick={answerCall}
+            className="flex flex-col items-center"
+          >
+            <div className="w-16 h-16 rounded-full bg-green-600 flex items-center justify-center text-xl shadow-lg active:scale-95 transition">
+              📞
+            </div>
+            <span className="text-xs mt-2">Answer</span>
+          </button>
+
+          {/* DECLINE */}
+          <button
+            onClick={declineCall}
+            className="flex flex-col items-center"
+          >
+            <div className="w-16 h-16 rounded-full bg-red-600 flex items-center justify-center text-xl shadow-lg active:scale-95 transition">
+              ✖
+            </div>
+            <span className="text-xs mt-2">Decline</span>
+          </button>
+        </div>
+      )}
+
+      {incomingCall?.status === "answered" && (
+        <button
+          onClick={endCall}
+          className="flex flex-col items-center"
+        >
+          <div className="w-16 h-16 rounded-full bg-red-600 flex items-center justify-center text-xl shadow-lg active:scale-95 transition">
+            🔴
+          </div>
+          <span className="text-xs mt-2">End Call</span>
+        </button>
+      )}
+
+      {(incomingCall?.status === "declined" ||
+        incomingCall?.status === "cancelled") && (
+        <button
+          onClick={clearCall}
+          className="bg-white text-black px-6 py-3 rounded-full text-sm font-semibold"
+        >
+          Clear
+        </button>
+      )}
+
+      {/* ERROR */}
+      {audioError && (
+        <p className="text-red-400 text-sm text-center px-6">
+          {audioError}
+        </p>
+      )}
+    </div>
+  </div>
+);
 }
