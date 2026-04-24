@@ -7,7 +7,6 @@ import { supabase } from "@/lib/supabase";
 
 type CallStatus = "calling" | "answered" | "declined" | "cancelled";
 type MediaMode = "video" | "audio_only";
-type PermissionStateLike = "granted" | "prompt" | "denied" | "unknown";
 
 type IceCandidateJSON = {
   candidate: string;
@@ -64,10 +63,6 @@ export default function UnitCallPage({
   const [mediaMode, setMediaMode] = useState<MediaMode>("video");
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [isSettingUp, setIsSettingUp] = useState(false);
-  const [cameraPermission, setCameraPermission] =
-    useState<PermissionStateLike>("unknown");
-  const [microphonePermission, setMicrophonePermission] =
-    useState<PermissionStateLike>("unknown");
   const [showPermissionHelp, setShowPermissionHelp] = useState(false);
 
   function clearCallTimeout() {
@@ -185,33 +180,6 @@ export default function UnitCallPage({
     }
   }
 
-  async function readPermissionState(name: "camera" | "microphone") {
-    try {
-      const permissionsApi = (navigator as Navigator & {
-        permissions?: {
-          query: (input: { name: string }) => Promise<{ state: PermissionStateLike }>;
-        };
-      }).permissions;
-
-      if (!permissionsApi?.query) return "unknown";
-
-      const result = await permissionsApi.query({ name });
-      return result.state ?? "unknown";
-    } catch {
-      return "unknown";
-    }
-  }
-
-  async function refreshPermissionStates() {
-    const [cameraState, microphoneState] = await Promise.all([
-      readPermissionState("camera"),
-      readPermissionState("microphone"),
-    ]);
-
-    setCameraPermission(cameraState);
-    setMicrophonePermission(microphoneState);
-  }
-
   async function startCallSetup(mode: SetupMode) {
     if (!callId || isSettingUp) return;
 
@@ -233,8 +201,6 @@ export default function UnitCallPage({
               audio: true,
             }
       );
-
-      await refreshPermissionStates();
 
       streamRef.current = stream;
 
@@ -332,6 +298,7 @@ export default function UnitCallPage({
       if (callUpdateError) {
         console.log("Failed to save call setup:", callUpdateError);
         setError("Could not start the call.");
+        setShowPermissionHelp(true);
         setIsSettingUp(false);
         return;
       }
@@ -345,13 +312,12 @@ export default function UnitCallPage({
     } catch (err: any) {
       console.log(err);
       stopEverything();
-      await refreshPermissionStates();
       setShowPermissionHelp(true);
 
       if (mode === "video") {
         if (err?.name === "NotAllowedError") {
           setError(
-            "Camera and microphone were blocked or not fully available. You can retry video, continue with voice only, or open browser/site settings and allow access."
+            "Camera and microphone were blocked or not fully available. Allow access in your browser settings, then try again."
           );
         } else if (err?.name === "NotFoundError") {
           setError(
@@ -359,13 +325,13 @@ export default function UnitCallPage({
           );
         } else {
           setError(
-            "Could not start the video call. You can retry or continue with a voice-only call."
+            "Could not start the video call. You can retry or continue with voice only."
           );
         }
       } else {
         if (err?.name === "NotAllowedError") {
           setError(
-            "Microphone permission is needed for a voice-only call. Open browser/site settings and allow the microphone, then try again."
+            "Microphone permission is needed for a voice-only call. Allow microphone access in your browser settings, then try again."
           );
         } else if (err?.name === "NotFoundError") {
           setError("No microphone was found on this device.");
@@ -380,7 +346,6 @@ export default function UnitCallPage({
 
   useEffect(() => {
     if (!callId) return;
-    refreshPermissionStates();
     startCallSetup("video");
 
     return () => {
@@ -556,9 +521,8 @@ export default function UnitCallPage({
   }
 
   const isVoiceOnly = mediaMode === "audio_only";
-  const showFallbackOptions = status === "calling" && (!!error || showPermissionHelp) && !isSettingUp;
-  const permissionsBlocked =
-    cameraPermission === "denied" || microphonePermission === "denied";
+  const showFallbackOptions =
+    status === "calling" && (!!error || showPermissionHelp) && !isSettingUp;
 
   if (status === "declined") {
     return (
@@ -649,23 +613,16 @@ export default function UnitCallPage({
         <div className="absolute bottom-0 left-0 right-0 p-5">
           <div className="mx-auto flex max-w-sm flex-col gap-3 rounded-2xl bg-white/95 p-4 shadow-lg">
             <p className="text-center text-sm text-gray-700">
-              If you denied access by mistake, allow camera and microphone in your browser/site settings, then try again.
+              If you denied access by mistake, allow camera and microphone in
+              your browser or site settings, then try again.
             </p>
-
-            {permissionsBlocked ? (
-              <div className="rounded-xl bg-gray-100 px-4 py-3 text-sm text-gray-700">
-                <p className="font-semibold text-gray-900">Permission status</p>
-                <p className="mt-1">Camera: {cameraPermission}</p>
-                <p>Microphone: {microphonePermission}</p>
-              </div>
-            ) : null}
 
             <button
               type="button"
               onClick={() => startCallSetup("video")}
               className="w-full rounded-full bg-black py-4 text-white font-semibold"
             >
-              Retry Video Call
+              I Allowed Permission — Try Video Again
             </button>
 
             <button
@@ -678,28 +635,23 @@ export default function UnitCallPage({
 
             <button
               type="button"
-              onClick={refreshPermissionStates}
-              className="w-full rounded-full bg-gray-200 py-4 text-black font-semibold"
-            >
-              Check Permission Status
-            </button>
-
-            <button
-              type="button"
               onClick={() => setShowPermissionHelp((value) => !value)}
               className="w-full rounded-full bg-white py-4 text-black font-semibold border"
             >
-              {showPermissionHelp ? "Hide Permission Help" : "Open Permission Help"}
+              {showPermissionHelp ? "Hide Help" : "How to Allow Camera/Mic"}
             </button>
 
             {showPermissionHelp ? (
               <div className="rounded-xl bg-gray-100 px-4 py-3 text-sm text-gray-700">
-                <p className="font-semibold text-gray-900">How to fix access</p>
+                <p className="font-semibold text-gray-900">
+                  How to fix access
+                </p>
                 <p className="mt-2">
-                  1. Tap the lock, info, or site settings icon near your browser address bar.
+                  1. Tap the lock, info, or site settings icon near your browser
+                  address bar.
                 </p>
                 <p>2. Allow camera and microphone for this site.</p>
-                <p>3. Come back here and tap “Retry Video Call”.</p>
+                <p>3. Come back here and tap “Try Video Again”.</p>
                 <p className="mt-2">
                   If video still fails, use “Continue with Voice Only”.
                 </p>
