@@ -698,26 +698,19 @@ export default function UnitCallPage({
           </div>
 
           <div className="flex gap-8">
-            <button
-              type="button"
-              onClick={cancelCall}
-              className="flex flex-col items-center"
-            >
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg active:scale-95 transition">
-                ✖
-              </div>
-              <span className="mt-2 text-xs">
-                {status === "answered" ? "End" : "Cancel"}
-              </span>
-            </button>
-
-            <Link href={backHref} className="flex flex-col items-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-xl text-black shadow-lg active:scale-95 transition">
-                ←
-              </div>
-              <span className="mt-2 text-xs">Back</span>
-            </Link>
-          </div>
+  <button
+    type="button"
+    onClick={cancelCall}
+    className="flex flex-col items-center"
+  >
+    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg active:scale-95 transition">
+      ✖
+    </div>
+    <span className="mt-2 text-xs">
+      {status === "answered" ? "End Call" : "Cancel Call"}
+    </span>
+  </button>
+</div>
         </div>
       </div>
     )}

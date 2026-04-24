@@ -532,6 +532,7 @@ useEffect(() => {
 
     if (incomingCall?.status === "calling") {
       ringtoneRef.current.currentTime = 0;
+      ringtoneRef.current.volume = 1;
 
       try {
         await ringtoneRef.current.play();
