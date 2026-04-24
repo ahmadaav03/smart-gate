@@ -531,15 +531,17 @@ useEffect(() => {
     if (!ringtoneRef.current) return;
 
     if (incomingCall?.status === "calling") {
-      ringtoneRef.current.currentTime = 0;
-      ringtoneRef.current.volume = 1;
+      const audio = ringtoneRef.current;
 
-      try {
-        await ringtoneRef.current.play();
-        console.log("Ringtone started");
-      } catch (err) {
-        console.log("Ringtone play blocked by browser:", err);
-      }
+audio.currentTime = 0;
+audio.volume = 1;
+audio.loop = true; // 👈 THIS is the important part
+
+try {
+  await audio.play();
+} catch (err) {
+  console.log("Ringtone blocked:", err);
+}
     } else {
       ringtoneRef.current.pause();
       ringtoneRef.current.currentTime = 0;
