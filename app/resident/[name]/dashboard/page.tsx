@@ -1,7 +1,15 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+
+type IceCandidateJSON = {
+  candidate: string;
+  sdpMid: string | null;
+  sdpMLineIndex: number | null;
+};
+
+type MediaMode = "video" | "audio_only";
 
 type Resident = {
   id: string;
@@ -10,6 +18,22 @@ type Resident = {
   display_name: string | null;
   availability_status: "available" | "dnd";
   ringtone: string;
+  avatar_url: string | null;
+};
+
+type Call = {
+  id: string;
+  status: "calling" | "answered" | "declined" | "cancelled";
+  created_at: string;
+  offer?: RTCSessionDescriptionInit | null;
+  answer?: RTCSessionDescriptionInit | null;
+  visitor_candidates?: IceCandidateJSON[] | null;
+  resident_candidates?: IceCandidateJSON[] | null;
+  resident_id?: string | null;
+  site_id?: string | null;
+  unit_id?: string | null;
+  expires_at?: string | null;
+  media_mode?: MediaMode | null;
 };
 
 type UnitLink = {
@@ -42,8 +66,96 @@ export default function ResidentDashboardPage({
 
   const [resident, setResident] = useState<Resident | null>(null);
   const [unitLinks, setUnitLinks] = useState<UnitLink[]>([]);
+  const [incomingCall, setIncomingCall] = useState<Call | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [displayNameDraft, setDisplayNameDraft] = useState("");
+  const [profileMessage, setProfileMessage] = useState("");
+
+  const [siteName, setSiteName] = useState("");
+  const [unitName, setUnitName] = useState("");
+  const [audioError, setAudioError] = useState("");
+
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const peerRef = useRef<RTCPeerConnection | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
+  const addedVisitorCandidatesRef = useRef<Set<string>>(new Set());
+
+  const displayName =
+    resident?.display_name || resident?.full_name || "Resident";
+
+  function stopPeer() {
+    if (peerRef.current) {
+      peerRef.current.close();
+      peerRef.current = null;
+    }
+
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+    }
+
+    localAudioTrackRef.current = null;
+    addedVisitorCandidatesRef.current = new Set();
+
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.pause();
+      remoteVideoRef.current.srcObject = null;
+      remoteVideoRef.current.muted = true;
+    }
+
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.pause();
+      remoteAudioRef.current.srcObject = null;
+      remoteAudioRef.current.muted = true;
+    }
+  }
+
+  async function addVisitorCandidates(
+    candidates: IceCandidateJSON[] | null | undefined
+  ) {
+    if (!peerRef.current || !candidates?.length) return;
+
+    if (!peerRef.current.remoteDescription) return;
+
+    for (const candidate of candidates) {
+      const key = JSON.stringify(candidate);
+      if (addedVisitorCandidatesRef.current.has(key)) continue;
+
+      try {
+        await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        addedVisitorCandidatesRef.current.add(key);
+      } catch (err) {
+        console.log("Resident failed to add visitor ICE candidate:", err);
+      }
+    }
+  }
+
+  async function hydrateLocation(call: Call) {
+    if (call.site_id) {
+      const { data } = await supabase
+        .from("sites")
+        .select("name")
+        .eq("id", call.site_id)
+        .maybeSingle();
+
+      setSiteName(data?.name || "");
+    }
+
+    if (call.unit_id) {
+      const { data } = await supabase
+        .from("units")
+        .select("name, display_name")
+        .eq("id", call.unit_id)
+        .maybeSingle();
+
+      setUnitName(data?.display_name || data?.name || "");
+    }
+  }
 
   useEffect(() => {
     async function loadDashboard() {
@@ -52,7 +164,7 @@ export default function ResidentDashboardPage({
       const { data: residentData, error: residentError } = await supabase
         .from("residents")
         .select(
-          "id, slug, full_name, display_name, availability_status, ringtone"
+          "id, slug, full_name, display_name, availability_status, ringtone, avatar_url"
         )
         .eq("slug", residentSlug)
         .maybeSingle();
@@ -64,9 +176,13 @@ export default function ResidentDashboardPage({
         return;
       }
 
-      setResident(residentData as Resident);
+      const loadedResident = residentData as Resident;
+      setResident(loadedResident);
+      setDisplayNameDraft(
+        loadedResident.display_name || loadedResident.full_name
+      );
 
-      const { data: linksData, error: linksError } = await supabase
+      const { data: linksData } = await supabase
         .from("unit_residents")
         .select(`
           units (
@@ -80,23 +196,199 @@ export default function ResidentDashboardPage({
             )
           )
         `)
-        .eq("resident_id", residentData.id);
-
-      if (linksError) {
-        console.log(linksError);
-      }
+        .eq("resident_id", loadedResident.id);
 
       const cleanedLinks: UnitLink[] =
-  linksData?.map((item: any) => ({
-    units: Array.isArray(item.units) ? item.units[0] || null : item.units,
-  })) || [];
+        linksData?.map((item: any) => ({
+          units: Array.isArray(item.units) ? item.units[0] || null : item.units,
+        })) || [];
 
-setUnitLinks(cleanedLinks);
+      setUnitLinks(cleanedLinks);
       setLoading(false);
     }
 
     loadDashboard();
   }, [residentSlug]);
+
+  useEffect(() => {
+    if (!resident?.id) return;
+
+    const residentId = resident.id;
+    let active = true;
+
+    async function loadLatestCallOnce() {
+      const { data } = await supabase
+        .from("calls")
+        .select("*")
+        .eq("resident_id", residentId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!active) return;
+
+      const call = (data as Call) || null;
+      setIncomingCall(call);
+
+      if (call) await hydrateLocation(call);
+    }
+
+    loadLatestCallOnce();
+
+    const channel = supabase
+      .channel(`dashboard-resident-${residentId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "calls",
+          filter: `resident_id=eq.${residentId}`,
+        },
+        async (payload) => {
+          if (payload.eventType === "DELETE") {
+            setIncomingCall(null);
+            setAudioError("");
+            setSiteName("");
+            setUnitName("");
+            stopPeer();
+            return;
+          }
+
+          const row = payload.new as Call;
+          setIncomingCall(row);
+          await hydrateLocation(row);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+      stopPeer();
+    };
+  }, [resident?.id]);
+
+  useEffect(() => {
+    async function prepareIncomingVideo() {
+      if (!incomingCall?.offer) return;
+      if (incomingCall.status === "declined" || incomingCall.status === "cancelled") return;
+      if (peerRef.current) return;
+
+      try {
+        const peer = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+
+        peerRef.current = peer;
+
+        const micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        });
+
+        micStreamRef.current = micStream;
+
+        const localAudioTrack = micStream.getAudioTracks()[0] || null;
+
+        if (localAudioTrack) {
+          localAudioTrack.enabled = false;
+          localAudioTrackRef.current = localAudioTrack;
+          peer.addTrack(localAudioTrack, micStream);
+        }
+
+        peer.ontrack = async (event) => {
+          const [remoteStream] = event.streams;
+          if (!remoteStream) return;
+
+          if (remoteVideoRef.current) {
+            const hasVideo = remoteStream.getVideoTracks().length > 0;
+            remoteVideoRef.current.srcObject = hasVideo ? remoteStream : null;
+            remoteVideoRef.current.muted = true;
+
+            if (hasVideo) {
+              await remoteVideoRef.current.play().catch(console.log);
+            }
+          }
+
+          if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteAudioRef.current.muted = incomingCall.status !== "answered";
+            await remoteAudioRef.current.play().catch(console.log);
+          }
+        };
+
+        peer.onicecandidate = async (event) => {
+          if (!event.candidate || !incomingCall.id) return;
+
+          const candidateData: IceCandidateJSON = {
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          };
+
+          const { data } = await supabase
+            .from("calls")
+            .select("resident_candidates")
+            .eq("id", incomingCall.id)
+            .maybeSingle();
+
+          const existing =
+            (data?.resident_candidates as IceCandidateJSON[] | null) || [];
+
+          const alreadyExists = existing.some(
+            (item) => JSON.stringify(item) === JSON.stringify(candidateData)
+          );
+
+          if (alreadyExists) return;
+
+          await supabase
+            .from("calls")
+            .update({
+              resident_candidates: [...existing, candidateData],
+            })
+            .eq("id", incomingCall.id);
+        };
+
+        await peer.setRemoteDescription(
+          new RTCSessionDescription(incomingCall.offer)
+        );
+
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+
+        await supabase
+          .from("calls")
+          .update({ answer })
+          .eq("id", incomingCall.id);
+
+        await addVisitorCandidates(incomingCall.visitor_candidates || []);
+      } catch (err: any) {
+        console.log("Failed to prepare call:", err);
+
+        if (err?.name === "NotAllowedError") {
+          setAudioError("Please allow microphone access to answer calls.");
+        } else {
+          setAudioError("Could not prepare the incoming call.");
+        }
+      }
+    }
+
+    prepareIncomingVideo();
+  }, [incomingCall?.id, incomingCall?.offer, incomingCall?.status]);
+
+  useEffect(() => {
+    async function syncVisitorCandidates() {
+      if (!incomingCall?.id || !peerRef.current) return;
+      await addVisitorCandidates(incomingCall.visitor_candidates || []);
+    }
+
+    syncVisitorCandidates();
+  }, [incomingCall?.visitor_candidates, incomingCall?.id]);
 
   async function updateAvailability(nextStatus: "available" | "dnd") {
     if (!resident) return;
@@ -109,12 +401,7 @@ setUnitLinks(cleanedLinks);
       .eq("id", resident.id);
 
     if (!error) {
-      setResident({
-        ...resident,
-        availability_status: nextStatus,
-      });
-    } else {
-      console.log(error);
+      setResident({ ...resident, availability_status: nextStatus });
     }
 
     setSaving(false);
@@ -131,20 +418,137 @@ setUnitLinks(cleanedLinks);
       .eq("id", resident.id);
 
     if (!error) {
-      setResident({
-        ...resident,
-        ringtone: nextRingtone,
-      });
-    } else {
-      console.log(error);
+      setResident({ ...resident, ringtone: nextRingtone });
     }
 
     setSaving(false);
   }
 
+  async function saveDisplayName() {
+    if (!resident) return;
+
+    const cleaned = displayNameDraft.trim();
+
+    if (!cleaned) {
+      setProfileMessage("Display name cannot be empty.");
+      return;
+    }
+
+    setSaving(true);
+    setProfileMessage("");
+
+    const { error } = await supabase
+      .from("residents")
+      .update({ display_name: cleaned })
+      .eq("id", resident.id);
+
+    if (!error) {
+      setResident({ ...resident, display_name: cleaned });
+      setProfileMessage("Profile updated.");
+    } else {
+      setProfileMessage("Could not update profile.");
+    }
+
+    setSaving(false);
+  }
+
+  async function uploadAvatar(file: File) {
+    if (!resident) return;
+
+    setSaving(true);
+    setProfileMessage("");
+
+    const ext = file.name.split(".").pop() || "jpg";
+    const path = `${resident.id}/avatar-${Date.now()}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(path, file, { upsert: true });
+
+    if (uploadError) {
+      console.log(uploadError);
+      setProfileMessage("Could not upload profile picture.");
+      setSaving(false);
+      return;
+    }
+
+    const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+
+    const publicUrl = data.publicUrl;
+
+    const { error: updateError } = await supabase
+      .from("residents")
+      .update({ avatar_url: publicUrl })
+      .eq("id", resident.id);
+
+    if (!updateError) {
+      setResident({ ...resident, avatar_url: publicUrl });
+      setProfileMessage("Profile picture updated.");
+    } else {
+      setProfileMessage("Could not save profile picture.");
+    }
+
+    setSaving(false);
+  }
+
+  async function answerCall() {
+    if (!incomingCall) return;
+
+    setAudioError("");
+
+    if (!localAudioTrackRef.current) {
+      setAudioError("Microphone is not ready on this device.");
+      return;
+    }
+
+    localAudioTrackRef.current.enabled = true;
+
+    await supabase
+      .from("calls")
+      .update({ status: "answered" })
+      .eq("id", incomingCall.id);
+
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.muted = false;
+      await remoteAudioRef.current.play().catch(console.log);
+    }
+  }
+
+  async function declineCall() {
+    if (!incomingCall) return;
+
+    await supabase
+      .from("calls")
+      .update({ status: "declined" })
+      .eq("id", incomingCall.id);
+  }
+
+  async function endCall() {
+    if (!incomingCall) return;
+
+    await supabase
+      .from("calls")
+      .update({ status: "cancelled" })
+      .eq("id", incomingCall.id);
+
+    stopPeer();
+  }
+
+  async function clearCall() {
+    if (!incomingCall) return;
+
+    await supabase.from("calls").delete().eq("id", incomingCall.id);
+
+    stopPeer();
+    setIncomingCall(null);
+    setSiteName("");
+    setUnitName("");
+    setAudioError("");
+  }
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B1F3A] text-white flex items-center justify-center px-6 text-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#0B1F3A] px-6 text-center text-white">
         <div>
           <div className="mx-auto mb-5 h-14 w-14 animate-pulse rounded-full bg-white/10" />
           <h1 className="text-2xl font-bold">Loading dashboard</h1>
@@ -156,7 +560,7 @@ setUnitLinks(cleanedLinks);
 
   if (!resident) {
     return (
-      <div className="min-h-screen bg-[#0B1F3A] text-white flex items-center justify-center px-6 text-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#0B1F3A] px-6 text-center text-white">
         <div>
           <h1 className="text-2xl font-bold">Resident not found</h1>
           <p className="mt-3 text-white/70">
@@ -167,24 +571,40 @@ setUnitLinks(cleanedLinks);
     );
   }
 
-  const displayName = resident.display_name || resident.full_name;
   const isAvailable = resident.availability_status === "available";
+  const isVoiceOnly = incomingCall?.media_mode === "audio_only";
+  const locationLine =
+    unitName && siteName ? `${unitName} • ${siteName}` : unitName || siteName;
 
   return (
-    <div className="min-h-screen bg-[#0B1F3A] px-5 py-8 text-white">
+    <div className="relative min-h-screen bg-[#0B1F3A] px-5 py-8 text-white">
       <div className="mx-auto max-w-md">
-        <div className="text-center">
-          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-white/10 text-3xl">
-            🛡️
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm text-white/60">Resident Dashboard</p>
+            <h1 className="mt-2 text-3xl font-bold">{displayName}</h1>
+            <p className="mt-2 text-sm text-white/70">
+              {isAvailable
+                ? "You are available for visitor calls."
+                : "Do not disturb is on."}
+            </p>
           </div>
 
-          <p className="text-sm text-white/60">Resident Dashboard</p>
-          <h1 className="mt-2 text-3xl font-bold">{displayName}</h1>
-          <p className="mt-2 text-sm text-white/70">
-            {isAvailable
-              ? "You are available for visitor calls."
-              : "Do not disturb is on."}
-          </p>
+          <button
+            type="button"
+            onClick={() => setProfileOpen(true)}
+            className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-white/10 text-xl"
+          >
+            {resident.avatar_url ? (
+              <img
+                src={resident.avatar_url}
+                alt="Profile"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              "👤"
+            )}
+          </button>
         </div>
 
         <div className="mt-8 rounded-3xl bg-white p-5 text-black shadow-2xl">
@@ -194,7 +614,7 @@ setUnitLinks(cleanedLinks);
               <p className="mt-1 text-sm text-gray-500">
                 {isAvailable
                   ? "Visitors can call you."
-                  : "Incoming calls should be blocked later."}
+                  : "Visitors will see that you are unavailable."}
               </p>
             </div>
 
@@ -214,13 +634,6 @@ setUnitLinks(cleanedLinks);
                 }`}
               />
             </button>
-          </div>
-
-          <div className="mt-5 rounded-2xl bg-gray-100 p-4">
-            <p className="text-sm font-semibold text-gray-700">Current mode</p>
-            <p className="mt-1 text-lg font-bold">
-              {isAvailable ? "Available" : "Do Not Disturb"}
-            </p>
           </div>
         </div>
 
@@ -247,7 +660,7 @@ setUnitLinks(cleanedLinks);
         <div className="mt-5 rounded-3xl bg-white p-5 text-black shadow-2xl">
           <p className="font-bold">Linked property</p>
           <p className="mt-1 text-sm text-gray-500">
-            These are the unit details linked to this resident.
+            This information is managed by the property admin.
           </p>
 
           <div className="mt-4 flex flex-col gap-3">
@@ -277,26 +690,193 @@ setUnitLinks(cleanedLinks);
             )}
           </div>
         </div>
+      </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <div className="rounded-3xl bg-white/10 p-4">
-            <p className="text-sm text-white/60">Recent calls</p>
-            <p className="mt-2 text-lg font-bold">Coming soon</p>
-          </div>
+      {profileOpen ? (
+        <div className="fixed inset-0 z-40 bg-black/60 px-5 py-8">
+          <div className="mx-auto max-w-md rounded-3xl bg-white p-5 text-black shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold">Profile</h2>
+              <button
+                type="button"
+                onClick={() => setProfileOpen(false)}
+                className="rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold"
+              >
+                Close
+              </button>
+            </div>
 
-          <div className="rounded-3xl bg-white/10 p-4">
-            <p className="text-sm text-white/60">Profile settings</p>
-            <p className="mt-2 text-lg font-bold">Coming soon</p>
+            <div className="mt-5 flex items-center gap-4">
+              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-gray-100 text-3xl">
+                {resident.avatar_url ? (
+                  <img
+                    src={resident.avatar_url}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  "👤"
+                )}
+              </div>
+
+              <label className="rounded-full bg-[#0B1F3A] px-5 py-3 text-sm font-semibold text-white">
+                Change photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) uploadAvatar(file);
+                  }}
+                />
+              </label>
+            </div>
+
+            <div className="mt-5">
+              <label className="text-sm font-semibold text-gray-700">
+                Display name visitors see
+              </label>
+              <input
+                value={displayNameDraft}
+                onChange={(e) => setDisplayNameDraft(e.target.value)}
+                className="mt-2 w-full rounded-2xl border border-gray-200 px-4 py-4 outline-none focus:border-[#0B1F3A]"
+              />
+
+              <button
+                type="button"
+                disabled={saving}
+                onClick={saveDisplayName}
+                className="mt-4 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white"
+              >
+                Save profile
+              </button>
+
+              {profileMessage ? (
+                <p className="mt-3 text-center text-sm text-gray-600">
+                  {profileMessage}
+                </p>
+              ) : null}
+            </div>
           </div>
         </div>
+      ) : null}
 
-        <a
-          href={`/resident/${resident.slug}`}
-          className="mt-8 block w-full rounded-full bg-white/10 py-4 text-center text-sm font-semibold text-white active:scale-95 transition"
-        >
-          Open test call listener
-        </a>
-      </div>
+      {incomingCall &&
+      (incomingCall.status === "calling" ||
+        incomingCall.status === "answered") ? (
+        <div className="fixed inset-0 z-50 bg-[#0B1F3A] text-white">
+          <div className="flex h-full flex-col">
+            <div className="px-5 pt-6 text-center">
+              <p className="text-sm text-white/70">
+                {incomingCall.status === "calling"
+                  ? "Incoming call"
+                  : "Call in progress"}
+              </p>
+              <h2 className="mt-2 text-2xl font-bold">
+                {locationLine || "Visitor call"}
+              </h2>
+            </div>
+
+            <div className="relative flex flex-1 items-center justify-center px-4">
+              {isVoiceOnly ? (
+                <div className="text-center">
+                  <div className="mx-auto mb-5 flex h-24 w-24 items-center justify-center rounded-full bg-white/10 text-4xl">
+                    🎙️
+                  </div>
+                  <p className="text-xl font-bold">Voice call</p>
+                </div>
+              ) : (
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className="w-full max-w-md rounded-3xl object-cover"
+                />
+              )}
+
+              {!isVoiceOnly && incomingCall.status === "calling" ? (
+                <div className="absolute rounded-xl bg-black/50 px-5 py-3 text-sm">
+                  Fetching visitor camera...
+                </div>
+              ) : null}
+
+              <audio ref={remoteAudioRef} autoPlay playsInline />
+            </div>
+
+            {audioError ? (
+              <p className="px-6 text-center text-sm text-red-300">
+                {audioError}
+              </p>
+            ) : null}
+
+            <div className="pb-8 pt-4">
+              {incomingCall.status === "calling" ? (
+                <div className="flex justify-center gap-8">
+                  <button
+                    type="button"
+                    onClick={answerCall}
+                    className="flex flex-col items-center"
+                  >
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-600 text-xl shadow-lg">
+                      📞
+                    </div>
+                    <span className="mt-2 text-xs">Answer</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={declineCall}
+                    className="flex flex-col items-center"
+                  >
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg">
+                      ✖
+                    </div>
+                    <span className="mt-2 text-xs">Decline</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={endCall}
+                    className="flex flex-col items-center"
+                  >
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg">
+                      🔴
+                    </div>
+                    <span className="mt-2 text-xs">End Call</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {incomingCall &&
+      (incomingCall.status === "declined" ||
+        incomingCall.status === "cancelled") ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B1F3A] px-6 text-white">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center text-black shadow-2xl">
+            <h2 className="text-2xl font-bold">
+              {incomingCall.status === "declined"
+                ? "Call declined"
+                : "Call ended"}
+            </h2>
+            <p className="mt-3 text-sm text-gray-500">
+              The call is no longer active.
+            </p>
+            <button
+              type="button"
+              onClick={clearCall}
+              className="mt-6 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
