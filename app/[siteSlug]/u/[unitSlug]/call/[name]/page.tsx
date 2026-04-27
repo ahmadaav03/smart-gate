@@ -216,9 +216,17 @@ export default function UnitCallPage({
       streamRef.current = stream;
 
       if (videoRef.current) {
-        const hasVideo = stream.getVideoTracks().length > 0;
-        videoRef.current.srcObject = hasVideo ? stream : null;
-      }
+  const hasVideo = stream.getVideoTracks().length > 0;
+  videoRef.current.srcObject = hasVideo ? stream : null;
+
+  if (hasVideo) {
+    try {
+      await videoRef.current.play();
+    } catch (playError) {
+      console.log("Visitor local video play failed:", playError);
+    }
+  }
+}
 
       const peer = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -282,6 +290,8 @@ export default function UnitCallPage({
       await peer.setLocalDescription(offer);
 
       const timeoutAt = new Date(Date.now() + 45_000).toISOString();
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       const { error: callUpdateError } = await supabase
         .from("calls")

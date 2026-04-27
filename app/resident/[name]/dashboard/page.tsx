@@ -85,6 +85,9 @@ export default function ResidentDashboardPage({
   const micStreamRef = useRef<MediaStream | null>(null);
   const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const addedVisitorCandidatesRef = useRef<Set<string>>(new Set());
+  const previewRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+  null
+);
 
   const displayName =
     resident?.display_name || resident?.full_name || "Resident";
@@ -102,6 +105,11 @@ export default function ResidentDashboardPage({
 
     localAudioTrackRef.current = null;
     addedVisitorCandidatesRef.current = new Set();
+
+    if (previewRetryTimeoutRef.current) {
+  clearTimeout(previewRetryTimeoutRef.current);
+  previewRetryTimeoutRef.current = null;
+}
 
     if (remoteVideoRef.current) {
       remoteVideoRef.current.pause();
@@ -282,10 +290,24 @@ hydrateLocation(row);
   }, [resident?.id]);
 
   useEffect(() => {
-    async function prepareIncomingVideo() {
+    async function prepareIncomingVideo(isRetry = false) {
       if (!incomingCall?.offer || !incomingCall?.visitor_ready) return;
-      if (incomingCall.status === "declined" || incomingCall.status === "cancelled") return;
-      if (peerRef.current) return;
+
+if (
+  incomingCall.status === "declined" ||
+  incomingCall.status === "cancelled"
+) {
+  return;
+}
+
+if (peerRef.current) {
+  if (isRetry) {
+    console.log("Retrying resident peer setup");
+    stopPeer();
+  } else {
+    return;
+  }
+}
 
       try {
         const peer = new RTCPeerConnection({
@@ -381,6 +403,25 @@ hydrateLocation(row);
           .eq("id", incomingCall.id);
 
         await addVisitorCandidates(incomingCall.visitor_candidates || []);
+        if (
+  incomingCall.status === "calling" &&
+  incomingCall.media_mode !== "audio_only" &&
+  previewRetryTimeoutRef.current === null
+) {
+  previewRetryTimeoutRef.current = setTimeout(() => {
+    previewRetryTimeoutRef.current = null;
+
+    const hasVideo =
+      !!remoteVideoRef.current?.srcObject &&
+      (remoteVideoRef.current.srcObject as MediaStream).getVideoTracks()
+        .length > 0;
+
+    if (!hasVideo) {
+      console.log("Resident video missing after setup, retrying once");
+      prepareIncomingVideo(true);
+    }
+  }, 1800);
+}
       } catch (err: any) {
         console.log("Failed to prepare call:", err);
 
@@ -393,7 +434,13 @@ hydrateLocation(row);
     }
 
     prepareIncomingVideo();
-  }, [incomingCall?.id, incomingCall?.offer, incomingCall?.status]);
+  }, [
+  incomingCall?.id,
+  incomingCall?.offer,
+  incomingCall?.status,
+  incomingCall?.visitor_ready,
+  incomingCall?.media_mode,
+]);
 
   useEffect(() => {
     async function syncVisitorCandidates() {
