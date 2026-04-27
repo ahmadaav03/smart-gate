@@ -24,6 +24,7 @@ type Resident = {
 type Call = {
   id: string;
   status: "calling" | "answered" | "declined" | "cancelled";
+  visitor_ready?: boolean | null;
   created_at: string;
   offer?: RTCSessionDescriptionInit | null;
   answer?: RTCSessionDescriptionInit | null;
@@ -228,9 +229,14 @@ export default function ResidentDashboardPage({
       if (!active) return;
 
       const call = (data as Call) || null;
-      setIncomingCall(call);
 
-      if (call) await hydrateLocation(call);
+if (!call || !call.visitor_ready) {
+  setIncomingCall(null);
+  return;
+}
+
+setIncomingCall(call);
+hydrateLocation(call);
     }
 
     loadLatestCallOnce();
@@ -256,8 +262,14 @@ export default function ResidentDashboardPage({
           }
 
           const row = payload.new as Call;
-          setIncomingCall(row);
-          await hydrateLocation(row);
+
+if (!row.visitor_ready) {
+  setIncomingCall(null);
+  return;
+}
+
+setIncomingCall(row);
+hydrateLocation(row);
         }
       )
       .subscribe();
@@ -271,7 +283,7 @@ export default function ResidentDashboardPage({
 
   useEffect(() => {
     async function prepareIncomingVideo() {
-      if (!incomingCall?.offer) return;
+      if (!incomingCall?.offer || !incomingCall?.visitor_ready) return;
       if (incomingCall.status === "declined" || incomingCall.status === "cancelled") return;
       if (peerRef.current) return;
 
@@ -283,13 +295,15 @@ export default function ResidentDashboardPage({
         peerRef.current = peer;
 
         const micStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-          video: false,
-        });
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    channelCount: 1,
+    sampleRate: 48000,
+  },
+  video: false,
+});
 
         micStreamRef.current = micStream;
 
@@ -795,11 +809,13 @@ export default function ResidentDashboardPage({
                 />
               )}
 
-              {!isVoiceOnly && incomingCall.status === "calling" ? (
-                <div className="absolute rounded-xl bg-black/50 px-5 py-3 text-sm">
-                  Fetching visitor camera...
-                </div>
-              ) : null}
+              {!isVoiceOnly &&
+incomingCall.status === "calling" &&
+!remoteVideoRef.current?.srcObject ? (
+  <div className="absolute rounded-xl bg-black/50 px-5 py-3 text-sm">
+    Connecting to visitor camera...
+  </div>
+) : null}
 
               <audio ref={remoteAudioRef} autoPlay playsInline />
             </div>
