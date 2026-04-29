@@ -306,22 +306,33 @@ export default function UnitCallPage({
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       const { error: callUpdateError } = await supabase
-        .from("calls")
-        .update({
-          offer,
-          media_mode: mode,
-          expires_at: timeoutAt,
-          status: "calling",
-          visitor_ready: true,
-        })
-        .eq("id", callId);
+  .from("calls")
+  .update({
+    offer,
+    media_mode: mode,
+    expires_at: timeoutAt,
+    status: "calling",
+    visitor_ready: true,
+  })
+  .eq("id", callId);
 
-      if (callUpdateError) {
-        console.log("Failed to save call setup:", callUpdateError);
-        setError("Could not start the call.");
-        setShowPermissionHelp(true);
-        return;
-      }
+if (callUpdateError) {
+  console.log("Failed to save call setup:", callUpdateError);
+  setError("Could not start the call.");
+  setShowPermissionHelp(true);
+  return;
+}
+
+console.log("visitor_ready set to true successfully");
+
+// Verify it actually saved
+const { data: verifyData } = await supabase
+  .from("calls")
+  .select("visitor_ready")
+  .eq("id", callId)
+  .maybeSingle();
+
+console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
 
       setExpiresAt(timeoutAt);
 
