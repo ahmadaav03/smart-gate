@@ -78,6 +78,7 @@ export default function ResidentDashboardPage({
   const [siteName, setSiteName] = useState("");
   const [unitName, setUnitName] = useState("");
   const [audioError, setAudioError] = useState("");
+  const [remoteVideoReady, setRemoteVideoReady] = useState(false);
 
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -116,6 +117,8 @@ export default function ResidentDashboardPage({
       remoteVideoRef.current.srcObject = null;
       remoteVideoRef.current.muted = true;
     }
+
+    setRemoteVideoReady(false);
 
     if (remoteAudioRef.current) {
       remoteAudioRef.current.pause();
@@ -354,14 +357,15 @@ if (peerRef.current) {
           if (!remoteStream) return;
 
           if (remoteVideoRef.current) {
-            const hasVideo = remoteStream.getVideoTracks().length > 0;
-            remoteVideoRef.current.srcObject = hasVideo ? remoteStream : null;
-            remoteVideoRef.current.muted = true;
+  const hasVideo = remoteStream.getVideoTracks().length > 0;
+  remoteVideoRef.current.srcObject = hasVideo ? remoteStream : null;
+  remoteVideoRef.current.muted = true;
 
-            if (hasVideo) {
-              await remoteVideoRef.current.play().catch(console.log);
-            }
-          }
+  if (hasVideo) {
+    await remoteVideoRef.current.play().catch(console.log);
+    setRemoteVideoReady(true);
+  }
+}
 
           if (remoteAudioRef.current) {
             remoteAudioRef.current.srcObject = remoteStream;
@@ -870,7 +874,7 @@ if (peerRef.current) {
 
               {!isVoiceOnly &&
 incomingCall.status === "calling" &&
-!remoteVideoRef.current?.srcObject ? (
+!remoteVideoReady ? (
   <div className="absolute rounded-xl bg-black/50 px-5 py-3 text-sm">
     Connecting to visitor camera...
   </div>
