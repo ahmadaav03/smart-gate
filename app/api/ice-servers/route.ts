@@ -14,7 +14,7 @@ export async function GET() {
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${TURN_KEY_API_TOKEN}`,
+          Authorization: `Bearer <78a4355a66d3b26cf37f00b7c9aef6a93606b3e2b335fd94c0a7c3427fc1aea9>`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ ttl: 86400 }),
