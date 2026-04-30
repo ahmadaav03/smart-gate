@@ -265,18 +265,26 @@ export default function ResidentDashboardPage({
 
           const row = payload.new as Call;
 
-          if (!row.visitor_ready) {
-            setIncomingCall(null);
-            return;
-          }
+if (!row.visitor_ready) {
+  setIncomingCall(null);
+  return;
+}
 
-          setIncomingCall((prev) => {
-            // Only hydrate location once when call first appears
-            if (!prev || prev.id !== row.id) {
-              hydrateLocation(row);
-            }
-            return row;
-          });
+// Fetch the full row so we always have offer + all fields
+const { data: fullRow } = await supabase
+  .from("calls")
+  .select("*")
+  .eq("id", row.id)
+  .maybeSingle();
+
+if (!fullRow) return;
+
+setIncomingCall((prev) => {
+  if (!prev || prev.id !== fullRow.id) {
+    hydrateLocation(fullRow);
+  }
+  return fullRow as Call;
+});
         }
       )
       .subscribe();
