@@ -308,125 +308,137 @@ export default function ResidentDashboardPage({
     const mediaMode = incomingCall.media_mode;
 
     async function setupPeer() {
-      peerSetupCallIdRef.current = callId;
+  console.log("setupPeer started for callId:", callId);
 
-      try {
-        const peer = new RTCPeerConnection({
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            {
-              urls: "turn:openrelay.metered.ca:80",
-              username: "openrelayproject",
-              credential: "openrelayproject",
-            },
-            {
-              urls: "turn:openrelay.metered.ca:443",
-              username: "openrelayproject",
-              credential: "openrelayproject",
-            },
-          ],
-        });
+  try {
+    const peer = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        {
+          urls: "turn:openrelay.metered.ca:80",
+          username: "openrelayproject",
+          credential: "openrelayproject",
+        },
+        {
+          urls: "turn:openrelay.metered.ca:443",
+          username: "openrelayproject",
+          credential: "openrelayproject",
+        },
+      ],
+    });
 
-        peerRef.current = peer;
+    peerRef.current = peer;
+    console.log("RTCPeerConnection created");
 
-        const micStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1,
-            sampleRate: 48000,
-          },
-          video: false,
-        });
+    const micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 48000,
+      },
+      video: false,
+    });
 
-        micStreamRef.current = micStream;
+    console.log("Mic stream obtained, tracks:", micStream.getAudioTracks().length);
 
-        const localAudioTrack = micStream.getAudioTracks()[0] || null;
+    micStreamRef.current = micStream;
 
-        if (localAudioTrack) {
-          localAudioTrack.enabled = false;
-          localAudioTrackRef.current = localAudioTrack;
-          peer.addTrack(localAudioTrack, micStream);
-        }
+    const localAudioTrack = micStream.getAudioTracks()[0] || null;
+    console.log("Local audio track:", localAudioTrack?.label, "state:", localAudioTrack?.readyState);
 
-        peer.ontrack = async (event) => {
-          const [remoteStream] = event.streams;
-          if (!remoteStream) return;
+    if (localAudioTrack) {
+      localAudioTrack.enabled = false;
+      localAudioTrackRef.current = localAudioTrack;
+      peer.addTrack(localAudioTrack, micStream);
+      console.log("Audio track added to peer");
+    } else {
+      console.log("WARNING: No audio track found");
+    }
 
-          if (remoteVideoRef.current) {
-            const hasVideo = remoteStream.getVideoTracks().length > 0;
-            remoteVideoRef.current.srcObject = hasVideo ? remoteStream : null;
-            remoteVideoRef.current.muted = true;
+    peer.ontrack = async (event) => {
+      console.log("ontrack fired");
+      const [remoteStream] = event.streams;
+      if (!remoteStream) return;
 
-            if (hasVideo) {
-              await remoteVideoRef.current.play().catch(console.log);
-              setRemoteVideoReady(true);
-            }
-          }
+      if (remoteVideoRef.current) {
+        const hasVideo = remoteStream.getVideoTracks().length > 0;
+        remoteVideoRef.current.srcObject = hasVideo ? remoteStream : null;
+        remoteVideoRef.current.muted = true;
 
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = remoteStream;
-            remoteAudioRef.current.muted = true;
-            await remoteAudioRef.current.play().catch(console.log);
-          }
-        };
-
-        peer.onicecandidate = async (event) => {
-          if (!event.candidate) return;
-
-          const candidateData: IceCandidateJSON = {
-            candidate: event.candidate.candidate,
-            sdpMid: event.candidate.sdpMid,
-            sdpMLineIndex: event.candidate.sdpMLineIndex,
-          };
-
-          const { data } = await supabase
-            .from("calls")
-            .select("resident_candidates")
-            .eq("id", callId)
-            .maybeSingle();
-
-          const existing =
-            (data?.resident_candidates as IceCandidateJSON[] | null) || [];
-
-          const alreadyExists = existing.some(
-            (item) => JSON.stringify(item) === JSON.stringify(candidateData)
-          );
-
-          if (alreadyExists) return;
-
-          await supabase
-            .from("calls")
-            .update({ resident_candidates: [...existing, candidateData] })
-            .eq("id", callId);
-        };
-
-        await peer.setRemoteDescription(
-          new RTCSessionDescription(offer!)
-        );
-
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
-
-        await supabase
-          .from("calls")
-          .update({ answer })
-          .eq("id", callId);
-
-        await addVisitorCandidates(visitorCandidates || []);
-
-      } catch (err: any) {
-        console.log("Failed to prepare call:", err);
-        peerSetupCallIdRef.current = null;
-
-        if (err?.name === "NotAllowedError") {
-          setAudioError("Please allow microphone access to answer calls.");
-        } else {
-          setAudioError("Could not prepare the incoming call.");
+        if (hasVideo) {
+          await remoteVideoRef.current.play().catch(console.log);
+          setRemoteVideoReady(true);
         }
       }
+
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = remoteStream;
+        remoteAudioRef.current.muted = true;
+        await remoteAudioRef.current.play().catch(console.log);
+      }
+    };
+
+    peer.onicecandidate = async (event) => {
+      if (!event.candidate) return;
+
+      const candidateData: IceCandidateJSON = {
+        candidate: event.candidate.candidate,
+        sdpMid: event.candidate.sdpMid,
+        sdpMLineIndex: event.candidate.sdpMLineIndex,
+      };
+
+      const { data } = await supabase
+        .from("calls")
+        .select("resident_candidates")
+        .eq("id", callId)
+        .maybeSingle();
+
+      const existing =
+        (data?.resident_candidates as IceCandidateJSON[] | null) || [];
+
+      const alreadyExists = existing.some(
+        (item) => JSON.stringify(item) === JSON.stringify(candidateData)
+      );
+
+      if (alreadyExists) return;
+
+      await supabase
+        .from("calls")
+        .update({ resident_candidates: [...existing, candidateData] })
+        .eq("id", callId);
+    };
+
+    await peer.setRemoteDescription(
+      new RTCSessionDescription(offer!)
+    );
+    console.log("Remote description set");
+
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
+    console.log("Answer created and set");
+
+    await supabase
+      .from("calls")
+      .update({ answer })
+      .eq("id", callId);
+    console.log("Answer saved to DB");
+
+    await addVisitorCandidates(visitorCandidates || []);
+    console.log("setupPeer completed successfully");
+
+  } catch (err: any) {
+    console.log("setupPeer FAILED at:", err?.name, err?.message, err);
+    peerSetupCallIdRef.current = null;
+
+    if (err?.name === "NotAllowedError") {
+      setAudioError("Please allow microphone access to answer calls.");
+    } else {
+      setAudioError("Could not prepare the incoming call.");
     }
+  }
+}
 
     setupPeer();
   }, [incomingCall?.id, incomingCall?.visitor_ready]);
