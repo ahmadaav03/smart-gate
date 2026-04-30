@@ -336,6 +336,7 @@ setIncomingCall((prev) => {
     });
 
     peerRef.current = peer;
+    (window as any)._debugPeer = peer;
     console.log("RTCPeerConnection created");
 
     const micStream = await navigator.mediaDevices.getUserMedia({
