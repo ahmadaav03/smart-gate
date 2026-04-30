@@ -231,18 +231,13 @@ export default function UnitCallPage({
 
       const peer = new RTCPeerConnection({
         iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          {
-            urls: "turn:openrelay.metered.ca:80",
-            username: "openrelayproject",
-            credential: "openrelayproject",
-          },
-          {
-            urls: "turn:openrelay.metered.ca:443",
-            username: "openrelayproject",
-            credential: "openrelayproject",
-          },
-        ],
+  { urls: "stun:stun.l.google.com:19302" },
+  {
+    urls: "turn:stun.cloudflare.com:3478",
+    username: "9a7b53f13defa3eb5ada022868e8e6f7",
+    credential: "78a4355a66d3b26cf37f00b7c9aef6a93606b3e2b335fd94c0a7c3427fc1aea9",
+  },
+],
       });
 
       peerRef.current = peer;
