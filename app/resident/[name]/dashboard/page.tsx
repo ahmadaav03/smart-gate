@@ -365,28 +365,29 @@ setIncomingCall((prev) => {
       console.log("WARNING: No audio track found");
     }
 
-    peer.ontrack = async (event) => {
-      console.log("ontrack fired");
-      const [remoteStream] = event.streams;
-      if (!remoteStream) return;
+    peer.ontrack = (event) => {
+  const [remoteStream] = event.streams;
+  if (!remoteStream) return;
 
-      if (remoteVideoRef.current) {
-        const hasVideo = remoteStream.getVideoTracks().length > 0;
-        remoteVideoRef.current.srcObject = hasVideo ? remoteStream : null;
-        remoteVideoRef.current.muted = true;
+  // Guard against ontrack firing twice with the same stream
+  if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== remoteStream) {
+    const hasVideo = remoteStream.getVideoTracks().length > 0;
+    remoteVideoRef.current.srcObject = hasVideo ? remoteStream : null;
+    remoteVideoRef.current.muted = true;
 
-        if (hasVideo) {
-          await remoteVideoRef.current.play().catch(console.log);
-          setRemoteVideoReady(true);
-        }
-      }
+    if (hasVideo) {
+      remoteVideoRef.current.play().then(() => {
+        setRemoteVideoReady(true);
+      }).catch(console.log);
+    }
+  }
 
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = remoteStream;
-        remoteAudioRef.current.muted = true;
-        await remoteAudioRef.current.play().catch(console.log);
-      }
-    };
+  if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== remoteStream) {
+    remoteAudioRef.current.srcObject = remoteStream;
+    remoteAudioRef.current.muted = true;
+    remoteAudioRef.current.play().catch(console.log);
+  }
+};
 
     peer.onicecandidate = async (event) => {
       if (!event.candidate) return;

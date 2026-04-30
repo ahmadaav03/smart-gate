@@ -52,6 +52,7 @@ export default function UnitCallPage({
   const answerAppliedRef = useRef(false);
   const addedResidentCandidatesRef = useRef<Set<string>>(new Set());
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusRef = useRef<CallStatus>("calling");
 
   const fallbackDisplayName = name.charAt(0).toUpperCase() + name.slice(1);
   const fallbackBackHref = `/${siteSlug}/u/${unitSlug}`;
@@ -66,6 +67,11 @@ export default function UnitCallPage({
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [showPermissionHelp, setShowPermissionHelp] = useState(false);
 
+  // Keep statusRef in sync so ontrack closure always has current value
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
   function clearCallTimeout() {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
@@ -75,7 +81,6 @@ export default function UnitCallPage({
 
   async function forceCancelCallingCall() {
     if (!callId) return;
-
     await supabase
       .from("calls")
       .update({ status: "cancelled" })
@@ -116,7 +121,6 @@ export default function UnitCallPage({
 
     for (const candidate of candidates) {
       const key = JSON.stringify(candidate);
-
       if (addedResidentCandidatesRef.current.has(key)) continue;
 
       try {
@@ -156,7 +160,6 @@ export default function UnitCallPage({
           .select("slug")
           .eq("id", callRow.site_id)
           .maybeSingle();
-
         if (siteData?.slug) resolvedSiteSlug = siteData.slug;
       }
 
@@ -166,7 +169,6 @@ export default function UnitCallPage({
           .select("slug")
           .eq("id", callRow.unit_id)
           .maybeSingle();
-
         if (unitData?.slug) resolvedUnitSlug = unitData.slug;
       }
 
@@ -216,33 +218,32 @@ export default function UnitCallPage({
       streamRef.current = stream;
 
       if (videoRef.current) {
-  const hasVideo = stream.getVideoTracks().length > 0;
-  videoRef.current.srcObject = hasVideo ? stream : null;
-
-  if (hasVideo) {
-    try {
-      await videoRef.current.play();
-    } catch (playError) {
-      console.log("Visitor local video play failed:", playError);
-    }
-  }
-}
+        const hasVideo = stream.getVideoTracks().length > 0;
+        videoRef.current.srcObject = hasVideo ? stream : null;
+        if (hasVideo) {
+          try {
+            await videoRef.current.play();
+          } catch (playError) {
+            console.log("Visitor local video play failed:", playError);
+          }
+        }
+      }
 
       const peer = new RTCPeerConnection({
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    {
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-  ],
-});
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          {
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:443",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+        ],
+      });
 
       peerRef.current = peer;
 
@@ -250,20 +251,22 @@ export default function UnitCallPage({
         peer.addTrack(track, stream);
       });
 
-      peer.ontrack = async (event) => {
+      // Use statusRef here so we always read the current status, not a stale closure
+      peer.ontrack = (event) => {
         const [remoteStream] = event.streams;
-        if (!remoteStream) return;
+        if (!remoteStream || !remoteAudioRef.current) return;
 
-        if (remoteAudioRef.current) {
+        // Only set srcObject if it's not already the same stream
+        if (remoteAudioRef.current.srcObject !== remoteStream) {
           remoteAudioRef.current.srcObject = remoteStream;
-          remoteAudioRef.current.muted = status !== "answered";
-
-          try {
-            await remoteAudioRef.current.play();
-          } catch (err) {
-            console.log("Visitor audio play failed:", err);
-          }
         }
+
+        // Always start muted — the status effect below will unmute when answered
+        remoteAudioRef.current.muted = true;
+
+        remoteAudioRef.current.play().catch((err) => {
+          console.log("Visitor audio play failed:", err);
+        });
       };
 
       peer.onicecandidate = async (event) => {
@@ -292,9 +295,7 @@ export default function UnitCallPage({
 
         await supabase
           .from("calls")
-          .update({
-            visitor_candidates: [...existing, candidateData],
-          })
+          .update({ visitor_candidates: [...existing, candidateData] })
           .eq("id", callId);
       };
 
@@ -306,33 +307,22 @@ export default function UnitCallPage({
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       const { error: callUpdateError } = await supabase
-  .from("calls")
-  .update({
-    offer,
-    media_mode: mode,
-    expires_at: timeoutAt,
-    status: "calling",
-    visitor_ready: true,
-  })
-  .eq("id", callId);
+        .from("calls")
+        .update({
+          offer,
+          media_mode: mode,
+          expires_at: timeoutAt,
+          status: "calling",
+          visitor_ready: true,
+        })
+        .eq("id", callId);
 
-if (callUpdateError) {
-  console.log("Failed to save call setup:", callUpdateError);
-  setError("Could not start the call.");
-  setShowPermissionHelp(true);
-  return;
-}
-
-console.log("visitor_ready set to true successfully");
-
-// Verify it actually saved
-const { data: verifyData } = await supabase
-  .from("calls")
-  .select("visitor_ready")
-  .eq("id", callId)
-  .maybeSingle();
-
-console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
+      if (callUpdateError) {
+        console.log("Failed to save call setup:", callUpdateError);
+        setError("Could not start the call.");
+        setShowPermissionHelp(true);
+        return;
+      }
 
       setExpiresAt(timeoutAt);
 
@@ -353,23 +343,15 @@ console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
 
       if (mode === "video") {
         if (err?.name === "NotAllowedError") {
-          setError(
-            "Camera and microphone were blocked or not fully available. Allow access in your browser settings, then try again."
-          );
+          setError("Camera and microphone were blocked. Allow access in your browser settings, then try again.");
         } else if (err?.name === "NotFoundError") {
-          setError(
-            "Camera or microphone was not found. You can continue with a voice-only call if your microphone works."
-          );
+          setError("Camera or microphone was not found. You can continue with a voice-only call.");
         } else {
-          setError(
-            "Could not start the video call. You can retry or continue with voice only."
-          );
+          setError("Could not start the video call. You can retry or continue with voice only.");
         }
       } else {
         if (err?.name === "NotAllowedError") {
-          setError(
-            "Microphone permission is needed for a voice-only call. Allow microphone access in your browser settings, then try again."
-          );
+          setError("Microphone permission is needed. Allow access in your browser settings, then try again.");
         } else if (err?.name === "NotFoundError") {
           setError("No microphone was found on this device.");
         } else {
@@ -384,10 +366,7 @@ console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
   useEffect(() => {
     if (!callId) return;
     startCallSetup("video");
-
-    return () => {
-      stopEverything();
-    };
+    return () => { stopEverything(); };
   }, [callId]);
 
   useEffect(() => {
@@ -398,23 +377,16 @@ console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
     async function loadCallOnce() {
       const { data, error } = await supabase
         .from("calls")
-        .select(
-          "id, status, answer, resident_candidates, site_id, unit_id, resident_id, expires_at, media_mode"
-        )
+        .select("id, status, answer, resident_candidates, site_id, unit_id, resident_id, expires_at, media_mode")
         .eq("id", callId)
         .maybeSingle();
 
-      if (error) {
-        console.log(error);
-        return;
-      }
-
+      if (error) { console.log(error); return; }
       if (!active || !data) return;
 
       const callRow = data as CallRow;
 
       await hydrateCallDetails(callRow);
-
       setStatus(callRow.status);
       setExpiresAt(callRow.expires_at || null);
       setMediaMode((callRow.media_mode as MediaMode) || "video");
@@ -511,48 +483,33 @@ console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
     if (status !== "calling") return;
 
     const msRemaining = new Date(expiresAt).getTime() - Date.now();
-
-    if (msRemaining <= 0) {
-      forceCancelCallingCall();
-      return;
-    }
+    if (msRemaining <= 0) { forceCancelCallingCall(); return; }
 
     clearCallTimeout();
-    timeoutRef.current = setTimeout(() => {
-      forceCancelCallingCall();
-    }, msRemaining);
-
+    timeoutRef.current = setTimeout(() => { forceCancelCallingCall(); }, msRemaining);
     return () => clearCallTimeout();
   }, [expiresAt, callId, status]);
 
+  // This is the single place that controls audio muting on the visitor side
   useEffect(() => {
-    async function syncRemoteAudio() {
-      if (!remoteAudioRef.current) return;
+    if (!remoteAudioRef.current) return;
 
-      if (status === "answered") {
-        remoteAudioRef.current.muted = false;
-
-        try {
-          await remoteAudioRef.current.play();
-        } catch (err) {
-          console.log("Visitor audio playback after answer failed:", err);
-        }
-      } else {
-        remoteAudioRef.current.muted = true;
-      }
+    if (status === "answered") {
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.play().catch((err) => {
+        console.log("Visitor audio unmute play failed:", err);
+      });
+    } else {
+      remoteAudioRef.current.muted = true;
     }
-
-    syncRemoteAudio();
   }, [status]);
 
   async function cancelCall() {
     if (!callId) return;
-
     await supabase
       .from("calls")
       .update({ status: "cancelled", visitor_ready: false })
       .eq("id", callId);
-
     stopEverything();
   }
 
@@ -566,11 +523,7 @@ console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
         <div className="w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-lg">
           <h1 className="text-2xl font-bold">Call Declined</h1>
           <p className="mt-3 text-gray-500">{displayName} declined the call.</p>
-
-          <Link
-            href={backHref}
-            className="mt-6 block w-full rounded-xl bg-black py-4 font-semibold text-white"
-          >
+          <Link href={backHref} className="mt-6 block w-full rounded-xl bg-black py-4 font-semibold text-white">
             Back to Residents
           </Link>
         </div>
@@ -584,11 +537,7 @@ console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
         <div className="w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-lg">
           <h1 className="text-2xl font-bold">Call Cancelled</h1>
           <p className="mt-3 text-gray-500">The call was cancelled.</p>
-
-          <Link
-            href={backHref}
-            className="mt-6 block w-full rounded-xl bg-black py-4 font-semibold text-white"
-          >
+          <Link href={backHref} className="mt-6 block w-full rounded-xl bg-black py-4 font-semibold text-white">
             Back to Residents
           </Link>
         </div>
@@ -605,9 +554,7 @@ console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
               🎙️
             </div>
             <h1 className="text-3xl font-bold">Voice Call</h1>
-            <p className="mt-3 text-white/75">
-              Waiting for {displayName} to answer.
-            </p>
+            <p className="mt-3 text-white/75">Waiting for {displayName} to answer.</p>
           </div>
         </div>
       ) : (
@@ -617,113 +564,68 @@ console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
           muted
           playsInline
           className="h-screen w-screen object-cover opacity-0 transition-opacity duration-500"
-          onLoadedData={(e) => {
-            (e.target as HTMLVideoElement).style.opacity = "1";
-          }}
+          onLoadedData={(e) => { (e.target as HTMLVideoElement).style.opacity = "1"; }}
         />
       )}
 
-      <audio ref={remoteAudioRef} autoPlay playsInline />
+      <audio key="remote-audio" ref={remoteAudioRef} autoPlay playsInline />
 
       <div className="absolute inset-0 bg-black/35" />
 
       <div className="absolute left-0 right-0 top-0 p-6 text-center">
         <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-white/15 text-2xl">
           {residentAvatarUrl ? (
-            <img
-              src={residentAvatarUrl}
-              alt={displayName}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            "👤"
-          )}
+            <img src={residentAvatarUrl} alt={displayName} className="h-full w-full object-cover" />
+          ) : "👤"}
         </div>
 
         <h1 className="text-2xl font-bold">
-          {status === "answered"
-            ? "Call in progress"
-            : isVoiceOnly
-            ? `Voice calling ${displayName}`
-            : `Calling ${displayName}`}
+          {status === "answered" ? "Call in progress" : isVoiceOnly ? `Voice calling ${displayName}` : `Calling ${displayName}`}
         </h1>
 
         <p className="mt-2 text-sm text-white/80">
-          {isSettingUp
-            ? "Preparing your camera and microphone..."
-            : status === "answered"
-            ? `You are connected to ${displayName}`
-            : isVoiceOnly
-            ? "Voice-only call active"
+          {isSettingUp ? "Preparing your camera and microphone..."
+            : status === "answered" ? `You are connected to ${displayName}`
+            : isVoiceOnly ? "Voice-only call active"
             : "Waiting for resident to answer"}
         </p>
 
         {error ? (
-          <p className="mx-auto mt-4 max-w-sm rounded-xl bg-red-600/90 px-4 py-3 text-sm">
-            {error}
-          </p>
+          <p className="mx-auto mt-4 max-w-sm rounded-xl bg-red-600/90 px-4 py-3 text-sm">{error}</p>
         ) : null}
       </div>
 
       {showFallbackOptions ? (
         <div className="absolute bottom-0 left-0 right-0 p-5">
           <div className="mx-auto max-w-sm rounded-3xl bg-white p-5 text-black shadow-2xl">
-            <h2 className="text-center text-lg font-bold">
-              Camera or mic access needed
-            </h2>
-
+            <h2 className="text-center text-lg font-bold">Camera or mic access needed</h2>
             <p className="mt-2 text-center text-sm text-gray-600">
-              If you denied access by mistake, allow camera and microphone in
-              your browser settings, then try again.
+              If you denied access by mistake, allow camera and microphone in your browser settings, then try again.
             </p>
-
             <div className="mt-5 flex flex-col gap-3">
-              <button
-                type="button"
-                onClick={() => startCallSetup("video")}
-                className="w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white active:scale-95 transition"
-              >
+              <button type="button" onClick={() => startCallSetup("video")}
+                className="w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white active:scale-95 transition">
                 I Allowed Permission — Try Video Again
               </button>
-
-              <button
-                type="button"
-                onClick={() => startCallSetup("audio_only")}
-                className="w-full rounded-full bg-[#F59E0B] py-4 font-semibold text-white active:scale-95 transition"
-              >
+              <button type="button" onClick={() => startCallSetup("audio_only")}
+                className="w-full rounded-full bg-[#F59E0B] py-4 font-semibold text-white active:scale-95 transition">
                 Continue with Voice Only
               </button>
-
-              <button
-                type="button"
-                onClick={() => setShowPermissionHelp((value) => !value)}
-                className="w-full rounded-full border border-gray-300 bg-white py-4 font-semibold text-black active:scale-95 transition"
-              >
+              <button type="button" onClick={() => setShowPermissionHelp((v) => !v)}
+                className="w-full rounded-full border border-gray-300 bg-white py-4 font-semibold text-black active:scale-95 transition">
                 {showPermissionHelp ? "Hide Help" : "How to Allow Camera/Mic"}
               </button>
-
               {showPermissionHelp ? (
                 <div className="rounded-2xl bg-gray-100 px-4 py-3 text-sm text-gray-700">
-                  <p className="font-semibold text-gray-900">
-                    How to fix access
-                  </p>
-                  <p className="mt-2">
-                    1. Tap the lock, info, or site settings icon near your
-                    browser address bar.
-                  </p>
+                  <p className="font-semibold text-gray-900">How to fix access</p>
+                  <p className="mt-2">1. Tap the lock or info icon near your browser address bar.</p>
                   <p>2. Allow camera and microphone for this site.</p>
-                  <p>3. Come back here and tap “Try Video Again”.</p>
-                  <p className="mt-2">
-                    If video still fails, use “Continue with Voice Only”.
-                  </p>
+                  <p>3. Come back here and tap "Try Video Again".</p>
+                  <p className="mt-2">If video still fails, use "Continue with Voice Only".</p>
                 </div>
               ) : null}
-
-              <button
-                type="button"
-                onClick={cancelCall}
-                className="w-full rounded-full bg-red-600 py-4 font-semibold text-white active:scale-95 transition"
-              >
+              <button type="button" onClick={cancelCall}
+                className="w-full rounded-full bg-red-600 py-4 font-semibold text-white active:scale-95 transition">
                 Cancel Call
               </button>
             </div>
@@ -733,26 +635,11 @@ console.log("DB confirms visitor_ready is:", verifyData?.visitor_ready);
         <div className="absolute bottom-0 left-0 right-0 p-6">
           <div className="mx-auto flex max-w-sm flex-col items-center gap-5">
             <div className="rounded-full bg-[#F59E0B] px-6 py-3 text-sm font-semibold shadow-lg">
-              {isSettingUp
-                ? "Starting..."
-                : status === "answered"
-                ? "In Call"
-                : isVoiceOnly
-                ? "Voice Calling..."
-                : "Ringing..."}
+              {isSettingUp ? "Starting..." : status === "answered" ? "In Call" : isVoiceOnly ? "Voice Calling..." : "Ringing..."}
             </div>
-
-            <button
-              type="button"
-              onClick={cancelCall}
-              className="flex flex-col items-center"
-            >
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg active:scale-95 transition">
-                ✖
-              </div>
-              <span className="mt-2 text-xs">
-                {status === "answered" ? "End Call" : "Cancel Call"}
-              </span>
+            <button type="button" onClick={cancelCall} className="flex flex-col items-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg active:scale-95 transition">✖</div>
+              <span className="mt-2 text-xs">{status === "answered" ? "End Call" : "Cancel Call"}</span>
             </button>
           </div>
         </div>
