@@ -323,7 +323,11 @@ setIncomingCall((prev) => {
       iceServers: [
   { urls: "stun:stun.l.google.com:19302" },
   {
-    urls: "turn:stun.cloudflare.com:3478",
+    urls: [
+      "turn:turn.cloudflare.com:3478",
+      "turn:turn.cloudflare.com:3478?transport=tcp",
+      "turns:turn.cloudflare.com:5349",
+    ],
     username: "9a7b53f13defa3eb5ada022868e8e6f7",
     credential: "78a4355a66d3b26cf37f00b7c9aef6a93606b3e2b335fd94c0a7c3427fc1aea9",
   },
