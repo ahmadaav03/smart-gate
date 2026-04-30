@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const TURN_KEY_ID = process.env.TURN_KEY_ID!;
-const TURN_KEY_API_TOKEN = process.env.TURN_KEY_API_TOKEN!;
+const TURN_KEY_API_TOKEN = process.env.CLOUDFLARE_REALTIME_API_TOKEN!;
 
 export async function GET() {
   try {
