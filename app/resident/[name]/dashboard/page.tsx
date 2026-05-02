@@ -37,6 +37,15 @@ type Call = {
   media_mode?: MediaMode | null;
 };
 
+type CallHistoryItem = {
+  id: string;
+  status: "answered" | "declined" | "cancelled";
+  created_at: string;
+  media_mode?: MediaMode | null;
+  site_name?: string | null;
+  unit_name?: string | null;
+};
+
 type UnitLink = {
   units: {
     id: string;
@@ -57,6 +66,37 @@ const ringtones = [
   { value: "beep", label: "Short Beep" },
 ];
 
+function formatCallTime(dateStr: string) {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+
+  const timeStr = date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  if (isToday) return `Today at ${timeStr}`;
+  if (isYesterday) return `Yesterday at ${timeStr}`;
+  return (
+    date.toLocaleDateString([], {
+      day: "numeric",
+      month: "short",
+    }) +
+    " at " +
+    timeStr
+  );
+}
+
+function getStatusLabel(status: string) {
+  if (status === "answered") return { label: "Answered", color: "text-green-600" };
+  if (status === "declined") return { label: "Declined", color: "text-red-500" };
+  return { label: "Missed", color: "text-gray-400" };
+}
+
 export default function ResidentDashboardPage({
   params,
 }: {
@@ -68,6 +108,7 @@ export default function ResidentDashboardPage({
   const [resident, setResident] = useState<Resident | null>(null);
   const [unitLinks, setUnitLinks] = useState<UnitLink[]>([]);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
+  const [callHistory, setCallHistory] = useState<CallHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -160,6 +201,48 @@ export default function ResidentDashboardPage({
     }
   }
 
+  async function loadCallHistory(residentId: string) {
+    const { data } = await supabase
+      .from("calls")
+      .select("id, status, created_at, media_mode, site_id, unit_id")
+      .eq("resident_id", residentId)
+      .in("status", ["answered", "declined", "cancelled"])
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (!data) return;
+
+    // Fetch site and unit names for each call
+    const enriched = await Promise.all(
+      data.map(async (call) => {
+        let site_name = null;
+        let unit_name = null;
+
+        if (call.site_id) {
+          const { data: siteData } = await supabase
+            .from("sites")
+            .select("name")
+            .eq("id", call.site_id)
+            .maybeSingle();
+          site_name = siteData?.name || null;
+        }
+
+        if (call.unit_id) {
+          const { data: unitData } = await supabase
+            .from("units")
+            .select("name, display_name")
+            .eq("id", call.unit_id)
+            .maybeSingle();
+          unit_name = unitData?.display_name || unitData?.name || null;
+        }
+
+        return { ...call, site_name, unit_name } as CallHistoryItem;
+      })
+    );
+
+    setCallHistory(enriched);
+  }
+
   useEffect(() => {
     async function loadDashboard() {
       setLoading(true);
@@ -207,6 +290,7 @@ export default function ResidentDashboardPage({
         })) || [];
 
       setUnitLinks(cleanedLinks);
+      await loadCallHistory(loadedResident.id);
       setLoading(false);
     }
 
@@ -265,26 +349,34 @@ export default function ResidentDashboardPage({
 
           const row = payload.new as Call;
 
-if (!row.visitor_ready) {
-  setIncomingCall(null);
-  return;
-}
+          // Refresh call history when a call completes
+          if (
+            row.status === "answered" ||
+            row.status === "declined" ||
+            row.status === "cancelled"
+          ) {
+            loadCallHistory(residentId);
+          }
 
-// Fetch the full row so we always have offer + all fields
-const { data: fullRow } = await supabase
-  .from("calls")
-  .select("*")
-  .eq("id", row.id)
-  .maybeSingle();
+          if (!row.visitor_ready) {
+            setIncomingCall(null);
+            return;
+          }
 
-if (!fullRow) return;
+          const { data: fullRow } = await supabase
+            .from("calls")
+            .select("*")
+            .eq("id", row.id)
+            .maybeSingle();
 
-setIncomingCall((prev) => {
-  if (!prev || prev.id !== fullRow.id) {
-    hydrateLocation(fullRow);
-  }
-  return fullRow as Call;
-});
+          if (!fullRow) return;
+
+          setIncomingCall((prev) => {
+            if (!prev || prev.id !== fullRow.id) {
+              hydrateLocation(fullRow);
+            }
+            return fullRow as Call;
+          });
         }
       )
       .subscribe();
@@ -296,7 +388,6 @@ setIncomingCall((prev) => {
     };
   }, [resident?.id]);
 
-  // This effect ONLY runs when a new call ID appears — not on every status change
   useEffect(() => {
     if (!incomingCall?.id || !incomingCall?.offer || !incomingCall?.visitor_ready) return;
 
@@ -307,150 +398,130 @@ setIncomingCall((prev) => {
       return;
     }
 
-    // KEY FIX: If we already set up a peer for this exact call ID, do not run again
+    // Set ref SYNCHRONOUSLY before any async work to prevent double-fire
     if (peerSetupCallIdRef.current === incomingCall.id) return;
+    peerSetupCallIdRef.current = incomingCall.id;
 
     const callId = incomingCall.id;
     const offer = incomingCall.offer;
     const visitorCandidates = incomingCall.visitor_candidates;
-    const mediaMode = incomingCall.media_mode;
 
     async function setupPeer() {
-  const iceRes = await fetch("/api/ice-servers");
-const { iceServers } = await iceRes.json();
+      const iceRes = await fetch("/api/ice-servers");
+      const { iceServers } = await iceRes.json();
 
-  try {
-    const peer = new RTCPeerConnection({ iceServers });
+      try {
+        const peer = new RTCPeerConnection({ iceServers });
+        peerRef.current = peer;
 
-    peerRef.current = peer;
-    (window as any)._debugPeer = peer;
-    console.log("RTCPeerConnection created");
+        const micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+            sampleRate: 48000,
+          },
+          video: false,
+        });
 
-    const micStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-        sampleRate: 48000,
-      },
-      video: false,
-    });
+        micStreamRef.current = micStream;
 
-    console.log("Mic stream obtained, tracks:", micStream.getAudioTracks().length);
+        const localAudioTrack = micStream.getAudioTracks()[0] || null;
 
-    micStreamRef.current = micStream;
+        if (localAudioTrack) {
+          localAudioTrack.enabled = false;
+          localAudioTrackRef.current = localAudioTrack;
+          peer.addTrack(localAudioTrack, micStream);
+        }
 
-    const localAudioTrack = micStream.getAudioTracks()[0] || null;
-    console.log("Local audio track:", localAudioTrack?.label, "state:", localAudioTrack?.readyState);
+        peer.ontrack = (event) => {
+          const [remoteStream] = event.streams;
+          if (!remoteStream) return;
 
-    if (localAudioTrack) {
-      localAudioTrack.enabled = false;
-      localAudioTrackRef.current = localAudioTrack;
-      peer.addTrack(localAudioTrack, micStream);
-      console.log("Audio track added to peer");
-    } else {
-      console.log("WARNING: No audio track found");
+          if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== remoteStream) {
+            const hasVideo = remoteStream.getVideoTracks().length > 0;
+            remoteVideoRef.current.srcObject = hasVideo ? remoteStream : null;
+            remoteVideoRef.current.muted = true;
+
+            if (hasVideo) {
+              remoteVideoRef.current.play().then(() => {
+                setRemoteVideoReady(true);
+              }).catch(console.log);
+            }
+          }
+
+          if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== remoteStream) {
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteAudioRef.current.muted = true;
+            remoteAudioRef.current.play().catch(console.log);
+          }
+        };
+
+        peer.onicecandidate = async (event) => {
+          if (!event.candidate) return;
+
+          const candidateData: IceCandidateJSON = {
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          };
+
+          const { data } = await supabase
+            .from("calls")
+            .select("resident_candidates")
+            .eq("id", callId)
+            .maybeSingle();
+
+          const existing =
+            (data?.resident_candidates as IceCandidateJSON[] | null) || [];
+
+          const alreadyExists = existing.some(
+            (item) => JSON.stringify(item) === JSON.stringify(candidateData)
+          );
+
+          if (alreadyExists) return;
+
+          await supabase
+            .from("calls")
+            .update({ resident_candidates: [...existing, candidateData] })
+            .eq("id", callId);
+        };
+
+        await peer.setRemoteDescription(new RTCSessionDescription(offer!));
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+
+        await supabase
+          .from("calls")
+          .update({ answer })
+          .eq("id", callId);
+
+        await addVisitorCandidates(visitorCandidates || []);
+
+      } catch (err: any) {
+        console.log("setupPeer failed:", err?.name, err?.message);
+        peerSetupCallIdRef.current = null;
+
+        if (err?.name === "NotAllowedError") {
+          setAudioError("Please allow microphone access to answer calls.");
+        } else {
+          setAudioError("Could not prepare the incoming call.");
+        }
+      }
     }
-
-    peer.ontrack = (event) => {
-  const [remoteStream] = event.streams;
-  if (!remoteStream) return;
-
-  // Guard against ontrack firing twice with the same stream
-  if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== remoteStream) {
-    const hasVideo = remoteStream.getVideoTracks().length > 0;
-    remoteVideoRef.current.srcObject = hasVideo ? remoteStream : null;
-    remoteVideoRef.current.muted = true;
-
-    if (hasVideo) {
-      remoteVideoRef.current.play().then(() => {
-        setRemoteVideoReady(true);
-      }).catch(console.log);
-    }
-  }
-
-  if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== remoteStream) {
-    remoteAudioRef.current.srcObject = remoteStream;
-    remoteAudioRef.current.muted = true;
-    remoteAudioRef.current.play().catch(console.log);
-  }
-};
-
-    peer.onicecandidate = async (event) => {
-      if (!event.candidate) return;
-
-      const candidateData: IceCandidateJSON = {
-        candidate: event.candidate.candidate,
-        sdpMid: event.candidate.sdpMid,
-        sdpMLineIndex: event.candidate.sdpMLineIndex,
-      };
-
-      const { data } = await supabase
-        .from("calls")
-        .select("resident_candidates")
-        .eq("id", callId)
-        .maybeSingle();
-
-      const existing =
-        (data?.resident_candidates as IceCandidateJSON[] | null) || [];
-
-      const alreadyExists = existing.some(
-        (item) => JSON.stringify(item) === JSON.stringify(candidateData)
-      );
-
-      if (alreadyExists) return;
-
-      await supabase
-        .from("calls")
-        .update({ resident_candidates: [...existing, candidateData] })
-        .eq("id", callId);
-    };
-
-    await peer.setRemoteDescription(
-      new RTCSessionDescription(offer!)
-    );
-    console.log("Remote description set");
-
-    const answer = await peer.createAnswer();
-    await peer.setLocalDescription(answer);
-    console.log("Answer created and set");
-
-    await supabase
-      .from("calls")
-      .update({ answer })
-      .eq("id", callId);
-    console.log("Answer saved to DB");
-
-    await addVisitorCandidates(visitorCandidates || []);
-    console.log("setupPeer completed successfully");
-
-  } catch (err: any) {
-    console.log("setupPeer FAILED at:", err?.name, err?.message, err);
-    peerSetupCallIdRef.current = null;
-
-    if (err?.name === "NotAllowedError") {
-      setAudioError("Please allow microphone access to answer calls.");
-    } else {
-      setAudioError("Could not prepare the incoming call.");
-    }
-  }
-}
 
     setupPeer();
   }, [incomingCall?.id, incomingCall?.visitor_ready]);
 
-  // Separate effect just for syncing new visitor ICE candidates
   useEffect(() => {
     async function syncVisitorCandidates() {
       if (!incomingCall?.id || !peerRef.current) return;
       await addVisitorCandidates(incomingCall.visitor_candidates || []);
     }
-
     syncVisitorCandidates();
   }, [incomingCall?.visitor_candidates]);
 
-  // Separate effect just for unmuting audio when call is answered
   useEffect(() => {
     if (incomingCall?.status === "answered" && remoteAudioRef.current) {
       remoteAudioRef.current.muted = false;
@@ -719,6 +790,53 @@ const { iceServers } = await iceRes.json();
                     <p className="mt-1 text-sm text-gray-500">
                       {site?.name || "Unknown property"}
                     </p>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Call History */}
+        <div className="mt-5 rounded-3xl bg-white p-5 text-black shadow-2xl">
+          <p className="font-bold">Recent calls</p>
+          <p className="mt-1 text-sm text-gray-500">
+            Your last 20 visitor calls.
+          </p>
+
+          <div className="mt-4 flex flex-col gap-3">
+            {callHistory.length === 0 ? (
+              <p className="text-sm text-gray-500">No call history yet.</p>
+            ) : (
+              callHistory.map((call) => {
+                const { label, color } = getStatusLabel(call.status);
+                const locationStr =
+                  call.unit_name && call.site_name
+                    ? `${call.unit_name} • ${call.site_name}`
+                    : call.unit_name || call.site_name || "Visitor call";
+
+                return (
+                  <div
+                    key={call.id}
+                    className="flex items-center gap-3 rounded-2xl bg-gray-50 p-4"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 text-lg">
+                      {call.status === "answered"
+                        ? "📞"
+                        : call.status === "declined"
+                        ? "✖"
+                        : "📵"}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold">{locationStr}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        {formatCallTime(call.created_at)} ·{" "}
+                        {call.media_mode === "audio_only" ? "Voice" : "Video"}
+                      </p>
+                    </div>
+                    <span className={`text-xs font-semibold ${color}`}>
+                      {label}
+                    </span>
                   </div>
                 );
               })
