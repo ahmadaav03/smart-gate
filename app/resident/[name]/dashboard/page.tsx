@@ -643,14 +643,14 @@ export default function ResidentDashboardPage({
   }
 
   async function clearCall() {
-    if (!incomingCall) return;
-    await supabase.from("calls").delete().eq("id", incomingCall.id);
-    stopPeer();
-    setIncomingCall(null);
-    setSiteName("");
-    setUnitName("");
-    setAudioError("");
-  }
+  if (!incomingCall) return;
+  stopPeer();
+  setIncomingCall(null);
+  setSiteName("");
+  setUnitName("");
+  setAudioError("");
+  await loadCallHistory(resident!.id);
+}
 
   if (loading) {
     return (
