@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
 export default function ResidentLoginPage() {
@@ -10,6 +10,48 @@ export default function ResidentLoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+  async function checkSession() {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (session?.user) {
+      const { data: resident } = await supabase
+        .from("residents")
+        .select("slug")
+        .eq("auth_user_id", session.user.id)
+        .maybeSingle();
+
+      if (resident?.slug) {
+        window.location.href = `/resident/${resident.slug}/dashboard`;
+      } else {
+        setError("No resident profile linked to this account. Please contact your property manager.");
+      }
+    }
+  }
+
+  checkSession();
+
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    async (event, session) => {
+      if (event === "SIGNED_IN" && session?.user) {
+        const { data: resident } = await supabase
+          .from("residents")
+          .select("slug")
+          .eq("auth_user_id", session.user.id)
+          .maybeSingle();
+
+        if (resident?.slug) {
+          window.location.href = `/resident/${resident.slug}/dashboard`;
+        } else {
+          setError("No resident profile linked to this account. Please contact your property manager.");
+        }
+      }
+    }
+  );
+
+  return () => subscription.unsubscribe();
+}, []);
 
   async function handleEmailAuth() {
     if (!email || !password) {
