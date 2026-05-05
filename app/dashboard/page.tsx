@@ -450,7 +450,7 @@ export default function DashboardPage() {
 
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
-          <div>
+          <div className="flex-1">
             <p className="text-sm text-white/60">
               {isAdmin && site ? site.name : "Dashboard"}
             </p>
@@ -463,15 +463,25 @@ export default function DashboardPage() {
               <p className="mt-2 text-sm text-white/70">Welcome back.</p>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => resident ? setProfileOpen(true) : null}
-            className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-white/10 text-xl active:scale-95 transition"
-          >
-            {resident?.avatar_url ? (
-              <img src={resident.avatar_url} alt="Profile" className="h-full w-full object-cover" />
-            ) : "👤"}
-          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.location.href = "/dashboard/settings"}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-lg transition active:scale-95 active:bg-white/20"
+            >
+              ⚙️
+            </button>
+            <button
+              type="button"
+              onClick={() => resident ? setProfileOpen(true) : null}
+              className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-white/10 text-xl active:scale-95 transition"
+            >
+              {resident?.avatar_url ? (
+                <img src={resident.avatar_url} alt="Profile" className="h-full w-full object-cover" />
+              ) : "👤"}
+            </button>
+          </div>
         </div>
 
         {/* Your Property block — admin only */}
@@ -599,37 +609,6 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
-        {/* Subscription — admin only */}
-        {isAdmin && site ? (
-          <button
-            type="button"
-            onClick={() => window.location.href = "/dashboard/settings"}
-            className="mt-4 w-full rounded-3xl bg-white p-5 text-left text-black shadow-2xl transition active:scale-[0.98] active:bg-gray-50"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-bold">Subscription</p>
-                <p className="mt-1 text-sm text-gray-500">
-                  {site.subscription_status === "trialing"
-                    ? daysLeft > 0
-                      ? `Free trial · ${daysLeft} days remaining`
-                      : "Trial ended · Tap to subscribe"
-                    : site.subscription_status === "active"
-                    ? "Active · Tap to manage"
-                    : "Expired · Tap to reactivate"}
-                </p>
-              </div>
-              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                site.subscription_status === "active" ? "bg-green-100 text-green-700"
-                : site.subscription_status === "trialing" ? "bg-blue-100 text-blue-700"
-                : "bg-red-100 text-red-700"
-              }`}>
-                {site.subscription_status === "trialing" ? "Trial" : site.subscription_status}
-              </span>
-            </div>
-          </button>
-        ) : null}
-
         {/* QR Code — admin only */}
         {isAdmin && site ? (
           <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
@@ -653,42 +632,6 @@ export default function DashboardPage() {
             </div>
           </div>
         ) : null}
-
-        {/* Settings / Sign out */}
-        <div className="mt-4 flex gap-3">
-          <button
-            type="button"
-            onClick={() => window.location.href = "/dashboard/settings"}
-            className="flex-1 rounded-full bg-white/10 py-4 text-sm font-semibold text-white transition active:scale-95 active:bg-white/20"
-          >
-            ⚙️ Settings
-          </button>
-          <button
-            type="button"
-            onClick={signOut}
-            className="flex-1 rounded-full bg-white/10 py-4 text-sm font-semibold text-white transition active:scale-95 active:bg-white/20"
-          >
-            Sign out
-          </button>
-        </div>
-
-        {/* Settings / Sign out */}
-        <div className="mt-4 flex gap-3">
-          <button
-            type="button"
-            onClick={() => window.location.href = "/dashboard/settings"}
-            className="flex-1 rounded-full bg-white/10 py-4 text-sm font-semibold text-white transition active:scale-95 active:bg-white/20"
-          >
-            ⚙️ Settings
-          </button>
-          <button
-            type="button"
-            onClick={signOut}
-            className="flex-1 rounded-full bg-white/10 py-4 text-sm font-semibold text-white transition active:scale-95 active:bg-white/20"
-          >
-            Sign out
-          </button>
-        </div>
 
       </div>
 
