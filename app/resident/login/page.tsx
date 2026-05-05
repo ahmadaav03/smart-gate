@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
-export default function ResidentLoginPage() {
+export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -11,15 +11,30 @@ export default function ResidentLoginPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-  async function checkSession() {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (session?.user) {
+  async function handleAuthenticatedUser(userId: string) {
+    // Check if they have a profile
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (!profile) {
+      // Brand new user — send to onboarding
+      window.location.href = "/onboarding";
+      return;
+    }
+
+    if (profile.role === "owner") {
+      window.location.href = "/owner/dashboard";
+      return;
+    }
+
+    if (profile.role === "resident") {
       const { data: resident } = await supabase
         .from("residents")
         .select("slug")
-        .eq("auth_user_id", session.user.id)
+        .eq("auth_user_id", userId)
         .maybeSingle();
 
       if (resident?.slug) {
@@ -27,31 +42,33 @@ export default function ResidentLoginPage() {
       } else {
         setError("No resident profile linked to this account. Please contact your property manager.");
       }
+      return;
     }
+
+    // Role is pending — send to onboarding
+    window.location.href = "/onboarding";
   }
 
-  checkSession();
-
-  const { data: { subscription } } = supabase.auth.onAuthStateChange(
-    async (event, session) => {
-      if (event === "SIGNED_IN" && session?.user) {
-        const { data: resident } = await supabase
-          .from("residents")
-          .select("slug")
-          .eq("auth_user_id", session.user.id)
-          .maybeSingle();
-
-        if (resident?.slug) {
-          window.location.href = `/resident/${resident.slug}/dashboard`;
-        } else {
-          setError("No resident profile linked to this account. Please contact your property manager.");
-        }
+  useEffect(() => {
+    async function checkSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await handleAuthenticatedUser(session.user.id);
       }
     }
-  );
 
-  return () => subscription.unsubscribe();
-}, []);
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === "SIGNED_IN" && session?.user) {
+          await handleAuthenticatedUser(session.user.id);
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   async function handleEmailAuth() {
     if (!email || !password) {
@@ -67,9 +84,6 @@ export default function ResidentLoginPage() {
       const { error } = await supabase.auth.signUp({
         email,
         password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=/resident/dashboard`,
-        },
       });
 
       if (error) {
@@ -87,18 +101,7 @@ export default function ResidentLoginPage() {
       if (error) {
         setError(error.message);
       } else if (data.user) {
-        // Find resident linked to this auth user
-        const { data: resident } = await supabase
-          .from("residents")
-          .select("slug")
-          .eq("auth_user_id", data.user.id)
-          .maybeSingle();
-
-        if (resident?.slug) {
-          window.location.href = `/resident/${resident.slug}/dashboard`;
-        } else {
-          setError("No resident profile is linked to this account. Please contact your property manager.");
-        }
+        await handleAuthenticatedUser(data.user.id);
       }
     }
 
@@ -134,8 +137,8 @@ export default function ResidentLoginPage() {
           </h1>
           <p className="mt-2 text-sm text-white/60">
             {mode === "login"
-              ? "Sign in to your resident dashboard"
-              : "Set up your resident account"}
+              ? "Sign in to your account"
+              : "Get started with SmartGate"}
           </p>
         </div>
 
