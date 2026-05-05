@@ -12,42 +12,24 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
 
   async function handleAuthenticatedUser(userId: string) {
-    // Check if they have a profile
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", userId)
-      .maybeSingle();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
 
-    if (!profile) {
-      // Brand new user — send to onboarding
-      window.location.href = "/onboarding";
-      return;
-    }
-
-    if (profile.role === "owner") {
-      window.location.href = "/owner/dashboard";
-      return;
-    }
-
-    if (profile.role === "resident") {
-      const { data: resident } = await supabase
-        .from("residents")
-        .select("slug")
-        .eq("auth_user_id", userId)
-        .maybeSingle();
-
-      if (resident?.slug) {
-        window.location.href = `/resident/${resident.slug}/dashboard`;
-      } else {
-        setError("No resident profile linked to this account. Please contact your property manager.");
-      }
-      return;
-    }
-
-    // Role is pending — send to onboarding
+  if (!profile) {
     window.location.href = "/onboarding";
+    return;
   }
+
+  if (profile.role === "property_admin" || profile.role === "resident") {
+    window.location.href = "/dashboard";
+    return;
+  }
+
+  window.location.href = "/onboarding";
+}
 
   useEffect(() => {
     async function checkSession() {

@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 
 export default function OnboardingPage() {
   const [userId, setUserId] = useState<string | null>(null);
-  const [step, setStep] = useState<"choose" | "owner-setup" | "resident-join">("choose");
+  const [step, setStep] = useState<"choose" | "admin-setup" | "resident-join">("choose");
   const [propertyName, setPropertyName] = useState("");
   const [isMultiUnit, setIsMultiUnit] = useState<boolean | null>(null);
   const [unitName, setUnitName] = useState("");
@@ -25,7 +25,7 @@ export default function OnboardingPage() {
     getUser();
   }, []);
 
-  async function setupAsOwner() {
+  async function setupAsAdmin() {
     if (!propertyName.trim()) {
       setError("Please enter your property name.");
       return;
@@ -40,15 +40,16 @@ export default function OnboardingPage() {
     setError("");
 
     try {
-      // Create profile as owner
       const { error: profileError } = await supabase
         .from("profiles")
-        .insert({ id: userId, role: "owner" });
+        .insert({ id: userId, role: "property_admin" });
 
       if (profileError) throw profileError;
 
-      // Create the site/property
-      const slug = propertyName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") + "-" + Date.now();
+      const slug =
+        propertyName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") +
+        "-" +
+        Date.now();
 
       const { data: site, error: siteError } = await supabase
         .from("sites")
@@ -62,28 +63,23 @@ export default function OnboardingPage() {
 
       if (siteError) throw siteError;
 
-      // If single unit, create a default unit automatically
       if (!isMultiUnit) {
-        await supabase
-          .from("units")
-          .insert({
-            site_id: site.id,
-            name: "main",
-            display_name: "Main House",
-            slug: "main",
-          });
+        await supabase.from("units").insert({
+          site_id: site.id,
+          name: "main",
+          display_name: "Main House",
+          slug: "main",
+        });
       } else if (unitName.trim()) {
-        await supabase
-          .from("units")
-          .insert({
-            site_id: site.id,
-            name: unitName.toLowerCase().replace(/\s+/g, "-"),
-            display_name: unitName.trim(),
-            slug: unitName.toLowerCase().replace(/\s+/g, "-"),
-          });
+        await supabase.from("units").insert({
+          site_id: site.id,
+          name: unitName.toLowerCase().replace(/\s+/g, "-"),
+          display_name: unitName.trim(),
+          slug: unitName.toLowerCase().replace(/\s+/g, "-"),
+        });
       }
 
-      window.location.href = "/owner/dashboard";
+      window.location.href = "/dashboard";
     } catch (err: any) {
       setError("Something went wrong. Please try again.");
       console.log(err);
@@ -103,7 +99,6 @@ export default function OnboardingPage() {
     setError("");
 
     try {
-      // Find the invite
       const { data: invite, error: inviteError } = await supabase
         .from("invites")
         .select("*")
@@ -117,22 +112,25 @@ export default function OnboardingPage() {
         return;
       }
 
-      // Check if expired
       if (new Date(invite.expires_at) < new Date()) {
         setError("This invite has expired. Please ask your property manager for a new one.");
         setLoading(false);
         return;
       }
 
-      // Create profile as resident
       await supabase
         .from("profiles")
         .insert({ id: userId, role: "resident" });
 
-      // Create resident record
       const { data: authUser } = await supabase.auth.getUser();
-      const fullName = authUser.user?.user_metadata?.full_name || authUser.user?.email || "Resident";
-      const slug = fullName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") + "-" + Date.now();
+      const fullName =
+        authUser.user?.user_metadata?.full_name ||
+        authUser.user?.email ||
+        "Resident";
+      const slug =
+        fullName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") +
+        "-" +
+        Date.now();
 
       const { data: resident, error: residentError } = await supabase
         .from("residents")
@@ -149,15 +147,11 @@ export default function OnboardingPage() {
 
       if (residentError) throw residentError;
 
-      // Link resident to unit
-      await supabase
-        .from("unit_residents")
-        .insert({
-          unit_id: invite.unit_id,
-          resident_id: resident.id,
-        });
+      await supabase.from("unit_residents").insert({
+        unit_id: invite.unit_id,
+        resident_id: resident.id,
+      });
 
-      // Mark invite as used
       await supabase
         .from("invites")
         .update({
@@ -167,7 +161,7 @@ export default function OnboardingPage() {
         })
         .eq("id", invite.id);
 
-      window.location.href = `/resident/${resident.slug}/dashboard`;
+      window.location.href = "/dashboard";
     } catch (err: any) {
       setError("Something went wrong. Please try again.");
       console.log(err);
@@ -193,7 +187,7 @@ export default function OnboardingPage() {
           <div className="flex flex-col gap-4">
             <button
               type="button"
-              onClick={() => setStep("owner-setup")}
+              onClick={() => setStep("admin-setup")}
               className="rounded-3xl bg-white p-5 text-left shadow-2xl transition active:scale-95"
             >
               <div className="flex items-center gap-4">
@@ -232,7 +226,7 @@ export default function OnboardingPage() {
     );
   }
 
-  if (step === "owner-setup") {
+  if (step === "admin-setup") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B1F3A] px-6">
         <div className="w-full max-w-sm">
@@ -312,7 +306,7 @@ export default function OnboardingPage() {
 
               <button
                 type="button"
-                onClick={setupAsOwner}
+                onClick={setupAsAdmin}
                 disabled={loading}
                 className="w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white transition active:scale-95 disabled:opacity-60"
               >
@@ -340,7 +334,7 @@ export default function OnboardingPage() {
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-white">Join your home</h1>
             <p className="mt-2 text-sm text-white/60">
-              Enter the invite code from your property manager
+              Enter the invite code sent to you
             </p>
           </div>
 
