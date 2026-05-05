@@ -474,185 +474,203 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {/* ADMIN SECTIONS — at top */}
+        {/* Your Property block — admin only */}
         {isAdmin && site ? (
-          <>
-            {/* Property management block — feels like a header card */}
-            <button
-              type="button"
-              onClick={() => window.location.href = "/dashboard/property"}
-              className="mt-8 w-full rounded-3xl bg-white p-5 text-left text-black shadow-2xl transition active:scale-[0.98] active:bg-gray-50"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                    Your Property
-                  </p>
-                  <h2 className="mt-1 text-2xl font-bold">{site.name}</h2>
-                  <p className="mt-1 text-sm text-gray-500">
-                    {units.length === 0
-                      ? "No units yet — tap to set up"
-                      : `${units.length} ${units.length === 1 ? "unit" : "units"} · Tap to manage`}
-                  </p>
-                </div>
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#0B1F3A] text-white text-lg">
-                  →
-                </div>
+          <button
+            type="button"
+            onClick={() => window.location.href = "/dashboard/property"}
+            className="mt-8 w-full rounded-3xl bg-white p-5 text-left text-black shadow-2xl transition active:scale-[0.98] active:bg-gray-50"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Your Property
+                </p>
+                <h2 className="mt-1 text-2xl font-bold">{site.name}</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  {units.length === 0
+                    ? "No units yet — tap to set up"
+                    : `${units.length} ${units.length === 1 ? "unit" : "units"} · Tap to manage`}
+                </p>
               </div>
-            </button>
-
-            {/* QR Code block */}
-            <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <p className="font-bold">Gate QR Plate</p>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Your physical QR plate is linked to this property. Visitors who scan it will be connected directly to your residents.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => window.location.href = `/dashboard/qr`}
-                    className="mt-3 rounded-full bg-[#0B1F3A] px-5 py-2 text-sm font-semibold text-white transition active:scale-95 active:bg-[#162d52]"
-                  >
-                    View QR code
-                  </button>
-                </div>
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 text-3xl">
-                  📱
-                </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#0B1F3A] text-white text-lg">
+                →
               </div>
             </div>
-
-            {/* Subscription block */}
-            <button
-              type="button"
-              onClick={() => window.location.href = "/dashboard/settings"}
-              className="mt-4 w-full rounded-3xl bg-white p-5 text-left text-black shadow-2xl transition active:scale-[0.98] active:bg-gray-50"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold">Subscription</p>
-                  <p className="mt-1 text-sm text-gray-500">
-                    {site.subscription_status === "trialing"
-                      ? daysLeft > 0
-                        ? `Free trial · ${daysLeft} days remaining`
-                        : "Trial ended · Tap to subscribe"
-                      : site.subscription_status === "active"
-                      ? "Active · Tap to manage"
-                      : "Expired · Tap to reactivate"}
-                  </p>
-                </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                  site.subscription_status === "active" ? "bg-green-100 text-green-700"
-                  : site.subscription_status === "trialing" ? "bg-blue-100 text-blue-700"
-                  : "bg-red-100 text-red-700"
-                }`}>
-                  {site.subscription_status === "trialing" ? "Trial" : site.subscription_status}
-                </span>
-              </div>
-            </button>
-          </>
+          </button>
         ) : null}
 
-        {/* RESIDENT SECTIONS */}
+        {/* Call availability — resident only */}
         {resident ? (
-          <>
-            {/* Availability toggle */}
-            <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="font-bold">Call availability</p>
-                  <p className="mt-1 text-sm text-gray-500">
-                    {isAvailable ? "Visitors can call you." : "Visitors will see that you are unavailable."}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => updateAvailability(isAvailable ? "dnd" : "available")}
-                  className={`relative h-8 w-16 rounded-full transition active:scale-95 ${isAvailable ? "bg-green-600" : "bg-red-600"}`}
-                >
-                  <span className={`absolute top-1 h-6 w-6 rounded-full bg-white transition-all ${isAvailable ? "left-9" : "left-1"}`} />
-                </button>
+          <div className={`${isAdmin ? "mt-4" : "mt-8"} rounded-3xl bg-white p-5 text-black shadow-2xl`}>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="font-bold">Call availability</p>
+                <p className="mt-1 text-sm text-gray-500">
+                  {isAvailable ? "Visitors can call you." : "Visitors will see that you are unavailable."}
+                </p>
               </div>
-            </div>
-
-            {/* Ringtone */}
-            <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
-              <p className="font-bold">Ringtone</p>
-              <p className="mt-1 text-sm text-gray-500">Choose the sound for incoming calls.</p>
-              <select
-                value={resident.ringtone}
-                disabled={saving}
-                onChange={(e) => updateRingtone(e.target.value)}
-                className="mt-4 w-full rounded-2xl border border-gray-200 px-4 py-4 outline-none focus:border-[#0B1F3A] transition"
-              >
-                {ringtones.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
-            </div>
-
-            {/* Call history — collapsed by default */}
-            <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
               <button
                 type="button"
-                onClick={() => setHistoryExpanded(!historyExpanded)}
-                className="flex w-full items-center justify-between transition active:scale-[0.98]"
+                disabled={saving}
+                onClick={() => updateAvailability(isAvailable ? "dnd" : "available")}
+                className={`relative h-8 w-16 rounded-full transition active:scale-95 ${isAvailable ? "bg-green-600" : "bg-red-600"}`}
               >
-                <div>
-                  <p className="font-bold text-left">Recent calls</p>
-                  <p className="mt-1 text-sm text-gray-500 text-left">
-                    {callHistory.length === 0
-                      ? "No call history yet"
-                      : `${callHistory.length} call${callHistory.length === 1 ? "" : "s"}`}
-                  </p>
-                </div>
-                <span className="text-gray-400 text-lg transition-transform duration-200" style={{ transform: historyExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
-                  ↓
-                </span>
+                <span className={`absolute top-1 h-6 w-6 rounded-full bg-white transition-all ${isAvailable ? "left-9" : "left-1"}`} />
               </button>
-
-              {historyExpanded && (
-                <div className="mt-4 flex flex-col gap-3">
-                  {callHistory.length === 0 ? (
-                    <p className="text-sm text-gray-500">No call history yet.</p>
-                  ) : (
-                    visibleHistory.map((call) => {
-                      const { label, color } = getStatusLabel(call.status);
-                      const locationStr = call.unit_name && call.site_name
-                        ? `${call.unit_name} • ${call.site_name}`
-                        : call.unit_name || call.site_name || "Visitor call";
-                      return (
-                        <div key={call.id} className="flex items-center gap-3 rounded-2xl bg-gray-50 p-4">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 text-lg">
-                            {call.status === "answered" ? "📞" : call.status === "declined" ? "✖" : "📵"}
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm font-semibold">{locationStr}</p>
-                            <p className="mt-0.5 text-xs text-gray-500">
-                              {formatCallTime(call.created_at)} · {call.media_mode === "audio_only" ? "Voice" : "Video"}
-                            </p>
-                          </div>
-                          <span className={`text-xs font-semibold ${color}`}>{label}</span>
-                        </div>
-                      );
-                    })
-                  )}
-                  {callHistory.length > 3 && (
-                    <button
-                      type="button"
-                      onClick={() => setHistoryExpanded(true)}
-                      className="text-center text-sm font-semibold text-[#0B1F3A] transition active:scale-95"
-                    >
-                      {historyExpanded && visibleHistory.length < callHistory.length
-                        ? `Show all ${callHistory.length} calls`
-                        : null}
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
-          </>
+          </div>
         ) : null}
+
+        {/* Ringtone — resident only */}
+        {resident ? (
+          <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
+            <p className="font-bold">Ringtone</p>
+            <p className="mt-1 text-sm text-gray-500">Choose the sound for incoming calls.</p>
+            <select
+              value={resident.ringtone}
+              disabled={saving}
+              onChange={(e) => updateRingtone(e.target.value)}
+              className="mt-4 w-full rounded-2xl border border-gray-200 px-4 py-4 outline-none focus:border-[#0B1F3A] transition"
+            >
+              {ringtones.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+          </div>
+        ) : null}
+
+        {/* Recent calls — resident only, collapsed */}
+        {resident ? (
+          <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setHistoryExpanded(!historyExpanded)}
+              className="flex w-full items-center justify-between transition active:scale-[0.98]"
+            >
+              <div>
+                <p className="font-bold text-left">Recent calls</p>
+                <p className="mt-1 text-sm text-gray-500 text-left">
+                  {callHistory.length === 0
+                    ? "No call history yet"
+                    : `${callHistory.length} call${callHistory.length === 1 ? "" : "s"}`}
+                </p>
+              </div>
+              <span className="text-gray-400 text-lg transition-transform duration-200" style={{ transform: historyExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
+                ↓
+              </span>
+            </button>
+
+            {historyExpanded && (
+              <div className="mt-4 flex flex-col gap-3">
+                {callHistory.length === 0 ? (
+                  <p className="text-sm text-gray-500">No call history yet.</p>
+                ) : (
+                  visibleHistory.map((call) => {
+                    const { label, color } = getStatusLabel(call.status);
+                    const locationStr = call.unit_name && call.site_name
+                      ? `${call.unit_name} • ${call.site_name}`
+                      : call.unit_name || call.site_name || "Visitor call";
+                    return (
+                      <div key={call.id} className="flex items-center gap-3 rounded-2xl bg-gray-50 p-4">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 text-lg">
+                          {call.status === "answered" ? "📞" : call.status === "declined" ? "✖" : "📵"}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold">{locationStr}</p>
+                          <p className="mt-0.5 text-xs text-gray-500">
+                            {formatCallTime(call.created_at)} · {call.media_mode === "audio_only" ? "Voice" : "Video"}
+                          </p>
+                        </div>
+                        <span className={`text-xs font-semibold ${color}`}>{label}</span>
+                      </div>
+                    );
+                  })
+                )}
+                {callHistory.length > 3 && !historyExpanded && (
+                  <button
+                    type="button"
+                    onClick={() => setHistoryExpanded(true)}
+                    className="text-center text-sm font-semibold text-[#0B1F3A] transition active:scale-95"
+                  >
+                    Show all {callHistory.length} calls
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {/* Subscription — admin only */}
+        {isAdmin && site ? (
+          <button
+            type="button"
+            onClick={() => window.location.href = "/dashboard/settings"}
+            className="mt-4 w-full rounded-3xl bg-white p-5 text-left text-black shadow-2xl transition active:scale-[0.98] active:bg-gray-50"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-bold">Subscription</p>
+                <p className="mt-1 text-sm text-gray-500">
+                  {site.subscription_status === "trialing"
+                    ? daysLeft > 0
+                      ? `Free trial · ${daysLeft} days remaining`
+                      : "Trial ended · Tap to subscribe"
+                    : site.subscription_status === "active"
+                    ? "Active · Tap to manage"
+                    : "Expired · Tap to reactivate"}
+                </p>
+              </div>
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                site.subscription_status === "active" ? "bg-green-100 text-green-700"
+                : site.subscription_status === "trialing" ? "bg-blue-100 text-blue-700"
+                : "bg-red-100 text-red-700"
+              }`}>
+                {site.subscription_status === "trialing" ? "Trial" : site.subscription_status}
+              </span>
+            </div>
+          </button>
+        ) : null}
+
+        {/* QR Code — admin only */}
+        {isAdmin && site ? (
+          <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <p className="font-bold">Gate QR Plate</p>
+                <p className="mt-1 text-sm text-gray-500">
+                  Your physical QR plate is linked to this property. Visitors who scan it will be connected directly to your residents.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => window.location.href = `/dashboard/qr`}
+                  className="mt-3 rounded-full bg-[#0B1F3A] px-5 py-2 text-sm font-semibold text-white transition active:scale-95 active:bg-[#162d52]"
+                >
+                  View QR code
+                </button>
+              </div>
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 text-3xl">
+                📱
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Settings / Sign out */}
+        <div className="mt-4 flex gap-3">
+          <button
+            type="button"
+            onClick={() => window.location.href = "/dashboard/settings"}
+            className="flex-1 rounded-full bg-white/10 py-4 text-sm font-semibold text-white transition active:scale-95 active:bg-white/20"
+          >
+            ⚙️ Settings
+          </button>
+          <button
+            type="button"
+            onClick={signOut}
+            className="flex-1 rounded-full bg-white/10 py-4 text-sm font-semibold text-white transition active:scale-95 active:bg-white/20"
+          >
+            Sign out
+          </button>
+        </div>
 
         {/* Settings / Sign out */}
         <div className="mt-4 flex gap-3">
