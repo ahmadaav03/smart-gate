@@ -100,6 +100,7 @@ export default function DashboardPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
   const [callHistory, setCallHistory] = useState<CallHistoryItem[]>([]);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -158,7 +159,14 @@ export default function DashboardPage() {
   async function loadCallHistory(residentId: string) {
     const { data } = await supabase
       .from("calls")
-      .select("id, status, created_at, media_mode, site_id, unit_id")
+      .select(`
+        id,
+        status,
+        created_at,
+        media_mode,
+        sites ( name ),
+        units ( name, display_name )
+      `)
       .eq("resident_id", residentId)
       .in("status", ["answered", "declined", "cancelled"])
       .order("created_at", { ascending: false })
@@ -166,21 +174,14 @@ export default function DashboardPage() {
 
     if (!data) return;
 
-    const enriched = await Promise.all(
-      data.map(async (call) => {
-        let site_name = null;
-        let unit_name = null;
-        if (call.site_id) {
-          const { data: s } = await supabase.from("sites").select("name").eq("id", call.site_id).maybeSingle();
-          site_name = s?.name || null;
-        }
-        if (call.unit_id) {
-          const { data: u } = await supabase.from("units").select("name, display_name").eq("id", call.unit_id).maybeSingle();
-          unit_name = u?.display_name || u?.name || null;
-        }
-        return { ...call, site_name, unit_name } as CallHistoryItem;
-      })
-    );
+    const enriched = data.map((call: any) => ({
+      id: call.id,
+      status: call.status,
+      created_at: call.created_at,
+      media_mode: call.media_mode,
+      site_name: call.sites?.name || null,
+      unit_name: call.units?.display_name || call.units?.name || null,
+    })) as CallHistoryItem[];
 
     setCallHistory(enriched);
   }
@@ -191,21 +192,15 @@ export default function DashboardPage() {
       if (!user) { window.location.href = "/resident/login"; return; }
 
       const { data: profileData } = await supabase
-        .from("profiles")
-        .select("id, role, full_name")
-        .eq("id", user.id)
-        .maybeSingle();
+        .from("profiles").select("id, role, full_name").eq("id", user.id).maybeSingle();
 
       if (!profileData) { window.location.href = "/onboarding"; return; }
-
       setProfile(profileData as Profile);
 
-      // Load resident profile if exists
       const { data: residentData } = await supabase
         .from("residents")
         .select("id, slug, full_name, display_name, availability_status, ringtone, avatar_url")
-        .eq("auth_user_id", user.id)
-        .maybeSingle();
+        .eq("auth_user_id", user.id).maybeSingle();
 
       if (residentData) {
         setResident(residentData as Resident);
@@ -213,25 +208,20 @@ export default function DashboardPage() {
         await loadCallHistory(residentData.id);
       }
 
-      // Load property if admin
       if (profileData.role === "property_admin") {
         const { data: siteData } = await supabase
           .from("sites")
           .select("id, name, slug, subscription_status, trial_ends_at")
           .eq("owner_id", user.id)
           .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(1).maybeSingle();
 
         if (siteData) {
           setSite(siteData as Site);
-
           const { data: unitsData } = await supabase
-            .from("units")
-            .select("id, name, display_name, slug")
+            .from("units").select("id, name, display_name, slug")
             .eq("site_id", siteData.id)
             .order("created_at", { ascending: true });
-
           setUnits((unitsData as Unit[]) || []);
         }
       }
@@ -266,7 +256,7 @@ export default function DashboardPage() {
         async (payload) => {
           if (payload.eventType === "DELETE") { setIncomingCall(null); setAudioError(""); setSiteName(""); setUnitName(""); stopPeer(); return; }
           const row = payload.new as Call;
-          if (row.status === "answered" || row.status === "declined" || row.status === "cancelled") { loadCallHistory(residentId); }
+          if (row.status === "answered" || row.status === "declined" || row.status === "cancelled") loadCallHistory(residentId);
           if (!row.visitor_ready) { setIncomingCall(null); return; }
           const { data: fullRow } = await supabase.from("calls").select("*").eq("id", row.id).maybeSingle();
           if (!fullRow) return;
@@ -290,25 +280,20 @@ export default function DashboardPage() {
     async function setupPeer() {
       const iceRes = await fetch("/api/ice-servers");
       const { iceServers } = await iceRes.json();
-
       try {
         const peer = new RTCPeerConnection({ iceServers });
         peerRef.current = peer;
-
         const micStream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, sampleRate: 48000 },
           video: false,
         });
-
         micStreamRef.current = micStream;
         const localAudioTrack = micStream.getAudioTracks()[0] || null;
-
         if (localAudioTrack) {
           localAudioTrack.enabled = false;
           localAudioTrackRef.current = localAudioTrack;
           peer.addTrack(localAudioTrack, micStream);
         }
-
         peer.ontrack = (event) => {
           const [remoteStream] = event.streams;
           if (!remoteStream) return;
@@ -324,7 +309,6 @@ export default function DashboardPage() {
             remoteAudioRef.current.play().catch(console.log);
           }
         };
-
         peer.onicecandidate = async (event) => {
           if (!event.candidate) return;
           const candidateData: IceCandidateJSON = { candidate: event.candidate.candidate, sdpMid: event.candidate.sdpMid, sdpMLineIndex: event.candidate.sdpMLineIndex };
@@ -333,13 +317,11 @@ export default function DashboardPage() {
           if (existing.some(item => JSON.stringify(item) === JSON.stringify(candidateData))) return;
           await supabase.from("calls").update({ resident_candidates: [...existing, candidateData] }).eq("id", callId);
         };
-
         await peer.setRemoteDescription(new RTCSessionDescription(offer!));
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
         await supabase.from("calls").update({ answer }).eq("id", callId);
         await addVisitorCandidates(visitorCandidates || []);
-
       } catch (err: any) {
         console.log("setupPeer failed:", err?.name, err?.message);
         peerSetupCallIdRef.current = null;
@@ -347,7 +329,6 @@ export default function DashboardPage() {
         else setAudioError("Could not prepare the incoming call.");
       }
     }
-
     setupPeer();
   }, [incomingCall?.id, incomingCall?.visitor_ready]);
 
@@ -459,9 +440,9 @@ export default function DashboardPage() {
   const isVoiceOnly = incomingCall?.media_mode === "audio_only";
   const locationLine = unitName && siteName ? `${unitName} • ${siteName}` : unitName || siteName;
   const isAdmin = profile?.role === "property_admin";
-
   const trialEnds = site ? new Date(site.trial_ends_at) : null;
   const daysLeft = trialEnds ? Math.ceil((trialEnds.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
+  const visibleHistory = historyExpanded ? callHistory : callHistory.slice(0, 3);
 
   return (
     <div className="relative min-h-screen bg-[#0B1F3A] px-5 py-8 text-white">
@@ -482,11 +463,10 @@ export default function DashboardPage() {
               <p className="mt-2 text-sm text-white/70">Welcome back.</p>
             )}
           </div>
-
           <button
             type="button"
-            onClick={() => resident ? setProfileOpen(true) : signOut()}
-            className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-white/10 text-xl"
+            onClick={() => resident ? setProfileOpen(true) : null}
+            className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-white/10 text-xl active:scale-95 transition"
           >
             {resident?.avatar_url ? (
               <img src={resident.avatar_url} alt="Profile" className="h-full w-full object-cover" />
@@ -494,10 +474,91 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {/* Resident sections — only if they have a resident profile */}
+        {/* ADMIN SECTIONS — at top */}
+        {isAdmin && site ? (
+          <>
+            {/* Property management block — feels like a header card */}
+            <button
+              type="button"
+              onClick={() => window.location.href = "/dashboard/property"}
+              className="mt-8 w-full rounded-3xl bg-white p-5 text-left text-black shadow-2xl transition active:scale-[0.98] active:bg-gray-50"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    Your Property
+                  </p>
+                  <h2 className="mt-1 text-2xl font-bold">{site.name}</h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    {units.length === 0
+                      ? "No units yet — tap to set up"
+                      : `${units.length} ${units.length === 1 ? "unit" : "units"} · Tap to manage`}
+                  </p>
+                </div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#0B1F3A] text-white text-lg">
+                  →
+                </div>
+              </div>
+            </button>
+
+            {/* QR Code block */}
+            <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1">
+                  <p className="font-bold">Gate QR Plate</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Your physical QR plate is linked to this property. Visitors who scan it will be connected directly to your residents.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => window.location.href = `/dashboard/qr`}
+                    className="mt-3 rounded-full bg-[#0B1F3A] px-5 py-2 text-sm font-semibold text-white transition active:scale-95 active:bg-[#162d52]"
+                  >
+                    View QR code
+                  </button>
+                </div>
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 text-3xl">
+                  📱
+                </div>
+              </div>
+            </div>
+
+            {/* Subscription block */}
+            <button
+              type="button"
+              onClick={() => window.location.href = "/dashboard/settings"}
+              className="mt-4 w-full rounded-3xl bg-white p-5 text-left text-black shadow-2xl transition active:scale-[0.98] active:bg-gray-50"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-bold">Subscription</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    {site.subscription_status === "trialing"
+                      ? daysLeft > 0
+                        ? `Free trial · ${daysLeft} days remaining`
+                        : "Trial ended · Tap to subscribe"
+                      : site.subscription_status === "active"
+                      ? "Active · Tap to manage"
+                      : "Expired · Tap to reactivate"}
+                  </p>
+                </div>
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                  site.subscription_status === "active" ? "bg-green-100 text-green-700"
+                  : site.subscription_status === "trialing" ? "bg-blue-100 text-blue-700"
+                  : "bg-red-100 text-red-700"
+                }`}>
+                  {site.subscription_status === "trialing" ? "Trial" : site.subscription_status}
+                </span>
+              </div>
+            </button>
+          </>
+        ) : null}
+
+        {/* RESIDENT SECTIONS */}
         {resident ? (
           <>
-            <div className="mt-8 rounded-3xl bg-white p-5 text-black shadow-2xl">
+            {/* Availability toggle */}
+            <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="font-bold">Call availability</p>
@@ -509,136 +570,107 @@ export default function DashboardPage() {
                   type="button"
                   disabled={saving}
                   onClick={() => updateAvailability(isAvailable ? "dnd" : "available")}
-                  className={`relative h-8 w-16 rounded-full transition ${isAvailable ? "bg-green-600" : "bg-red-600"}`}
+                  className={`relative h-8 w-16 rounded-full transition active:scale-95 ${isAvailable ? "bg-green-600" : "bg-red-600"}`}
                 >
-                  <span className={`absolute top-1 h-6 w-6 rounded-full bg-white transition ${isAvailable ? "left-9" : "left-1"}`} />
+                  <span className={`absolute top-1 h-6 w-6 rounded-full bg-white transition-all ${isAvailable ? "left-9" : "left-1"}`} />
                 </button>
               </div>
             </div>
 
-            <div className="mt-5 rounded-3xl bg-white p-5 text-black shadow-2xl">
+            {/* Ringtone */}
+            <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
               <p className="font-bold">Ringtone</p>
               <p className="mt-1 text-sm text-gray-500">Choose the sound for incoming calls.</p>
               <select
                 value={resident.ringtone}
                 disabled={saving}
                 onChange={(e) => updateRingtone(e.target.value)}
-                className="mt-4 w-full rounded-2xl border border-gray-200 px-4 py-4 outline-none focus:border-[#0B1F3A]"
+                className="mt-4 w-full rounded-2xl border border-gray-200 px-4 py-4 outline-none focus:border-[#0B1F3A] transition"
               >
                 {ringtones.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </div>
 
-            {/* Call history */}
-            <div className="mt-5 rounded-3xl bg-white p-5 text-black shadow-2xl">
-              <p className="font-bold">Recent calls</p>
-              <p className="mt-1 text-sm text-gray-500">Your last 20 visitor calls.</p>
-              <div className="mt-4 flex flex-col gap-3">
-                {callHistory.length === 0 ? (
-                  <p className="text-sm text-gray-500">No call history yet.</p>
-                ) : (
-                  callHistory.map((call) => {
-                    const { label, color } = getStatusLabel(call.status);
-                    const locationStr = call.unit_name && call.site_name
-                      ? `${call.unit_name} • ${call.site_name}`
-                      : call.unit_name || call.site_name || "Visitor call";
-                    return (
-                      <div key={call.id} className="flex items-center gap-3 rounded-2xl bg-gray-50 p-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 text-lg">
-                          {call.status === "answered" ? "📞" : call.status === "declined" ? "✖" : "📵"}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold">{locationStr}</p>
-                          <p className="mt-0.5 text-xs text-gray-500">
-                            {formatCallTime(call.created_at)} · {call.media_mode === "audio_only" ? "Voice" : "Video"}
-                          </p>
-                        </div>
-                        <span className={`text-xs font-semibold ${color}`}>{label}</span>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </>
-        ) : null}
-
-        {/* Admin sections */}
-        {isAdmin && site ? (
-          <>
-            <div className="mt-5 rounded-3xl bg-white p-5 text-black shadow-2xl">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold">Subscription</p>
-                  <p className="mt-1 text-sm text-gray-500">
-                    {site.subscription_status === "trialing"
-                      ? daysLeft > 0 ? `Free trial — ${daysLeft} days remaining` : "Trial ended"
-                      : site.subscription_status === "active" ? "Active subscription" : "Subscription expired"}
-                  </p>
-                </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                  site.subscription_status === "active" ? "bg-green-100 text-green-700"
-                  : site.subscription_status === "trialing" ? "bg-blue-100 text-blue-700"
-                  : "bg-red-100 text-red-700"
-                }`}>
-                  {site.subscription_status === "trialing" ? "Trial" : site.subscription_status}
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-3xl bg-white p-5 text-black shadow-2xl">
-              <p className="font-bold">Units & Residents</p>
-              <p className="mt-1 text-sm text-gray-500">Manage who can receive calls at your property.</p>
-              <div className="mt-4 flex flex-col gap-3">
-                {units.length === 0 ? (
-                  <p className="text-sm text-gray-500">No units yet.</p>
-                ) : (
-                  units.map((unit) => (
-                    <div key={unit.id} className="flex items-center justify-between rounded-2xl bg-gray-100 p-4">
-                      <div>
-                        <p className="font-semibold">{unit.display_name || unit.name}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => window.location.href = `/dashboard/unit/${unit.id}`}
-                        className="rounded-full bg-[#0B1F3A] px-4 py-2 text-xs font-semibold text-white"
-                      >
-                        Manage
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
+            {/* Call history — collapsed by default */}
+            <div className="mt-4 rounded-3xl bg-white p-5 text-black shadow-2xl">
               <button
                 type="button"
-                onClick={() => window.location.href = `/dashboard/unit/new?site=${site.id}`}
-                className="mt-4 w-full rounded-full border border-gray-200 py-3 text-sm font-semibold text-gray-700 transition active:scale-95"
+                onClick={() => setHistoryExpanded(!historyExpanded)}
+                className="flex w-full items-center justify-between transition active:scale-[0.98]"
               >
-                + Add unit
+                <div>
+                  <p className="font-bold text-left">Recent calls</p>
+                  <p className="mt-1 text-sm text-gray-500 text-left">
+                    {callHistory.length === 0
+                      ? "No call history yet"
+                      : `${callHistory.length} call${callHistory.length === 1 ? "" : "s"}`}
+                  </p>
+                </div>
+                <span className="text-gray-400 text-lg transition-transform duration-200" style={{ transform: historyExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
+                  ↓
+                </span>
               </button>
-            </div>
 
-            <div className="mt-5 rounded-3xl bg-white p-5 text-black shadow-2xl">
-              <p className="font-bold">QR Code</p>
-              <p className="mt-1 text-sm text-gray-500">
-                Place this at your gate for visitors to scan.
-              </p>
-              <div className="mt-4 rounded-2xl bg-gray-100 p-4 text-center">
-                <p className="text-sm font-semibold text-gray-700">{window.location.origin}/{site.slug}</p>
-                <p className="mt-2 text-xs text-gray-500">QR code generator coming soon</p>
-              </div>
+              {historyExpanded && (
+                <div className="mt-4 flex flex-col gap-3">
+                  {callHistory.length === 0 ? (
+                    <p className="text-sm text-gray-500">No call history yet.</p>
+                  ) : (
+                    visibleHistory.map((call) => {
+                      const { label, color } = getStatusLabel(call.status);
+                      const locationStr = call.unit_name && call.site_name
+                        ? `${call.unit_name} • ${call.site_name}`
+                        : call.unit_name || call.site_name || "Visitor call";
+                      return (
+                        <div key={call.id} className="flex items-center gap-3 rounded-2xl bg-gray-50 p-4">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 text-lg">
+                            {call.status === "answered" ? "📞" : call.status === "declined" ? "✖" : "📵"}
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold">{locationStr}</p>
+                            <p className="mt-0.5 text-xs text-gray-500">
+                              {formatCallTime(call.created_at)} · {call.media_mode === "audio_only" ? "Voice" : "Video"}
+                            </p>
+                          </div>
+                          <span className={`text-xs font-semibold ${color}`}>{label}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                  {callHistory.length > 3 && (
+                    <button
+                      type="button"
+                      onClick={() => setHistoryExpanded(true)}
+                      className="text-center text-sm font-semibold text-[#0B1F3A] transition active:scale-95"
+                    >
+                      {historyExpanded && visibleHistory.length < callHistory.length
+                        ? `Show all ${callHistory.length} calls`
+                        : null}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </>
         ) : null}
 
-        {/* Sign out */}
-        <button
-          type="button"
-          onClick={signOut}
-          className="mt-8 w-full rounded-full bg-white/10 py-4 text-sm font-semibold text-white transition active:scale-95"
-        >
-          Sign out
-        </button>
+        {/* Settings / Sign out */}
+        <div className="mt-4 flex gap-3">
+          <button
+            type="button"
+            onClick={() => window.location.href = "/dashboard/settings"}
+            className="flex-1 rounded-full bg-white/10 py-4 text-sm font-semibold text-white transition active:scale-95 active:bg-white/20"
+          >
+            ⚙️ Settings
+          </button>
+          <button
+            type="button"
+            onClick={signOut}
+            className="flex-1 rounded-full bg-white/10 py-4 text-sm font-semibold text-white transition active:scale-95 active:bg-white/20"
+          >
+            Sign out
+          </button>
+        </div>
 
       </div>
 
@@ -648,21 +680,38 @@ export default function DashboardPage() {
           <div className="mx-auto max-w-md rounded-3xl bg-white p-5 text-black shadow-2xl">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold">Profile</h2>
-              <button type="button" onClick={() => setProfileOpen(false)} className="rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold">Close</button>
+              <button
+                type="button"
+                onClick={() => setProfileOpen(false)}
+                className="rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold transition active:scale-95 active:bg-gray-200"
+              >
+                Close
+              </button>
             </div>
             <div className="mt-5 flex items-center gap-4">
               <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-gray-100 text-3xl">
                 {resident.avatar_url ? <img src={resident.avatar_url} alt="Profile" className="h-full w-full object-cover" /> : "👤"}
               </div>
-              <label className="rounded-full bg-[#0B1F3A] px-5 py-3 text-sm font-semibold text-white">
+              <label className="rounded-full bg-[#0B1F3A] px-5 py-3 text-sm font-semibold text-white transition active:scale-95 active:bg-[#162d52]">
                 Change photo
                 <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAvatar(f); }} />
               </label>
             </div>
             <div className="mt-5">
               <label className="text-sm font-semibold text-gray-700">Display name visitors see</label>
-              <input value={displayNameDraft} onChange={(e) => setDisplayNameDraft(e.target.value)} className="mt-2 w-full rounded-2xl border border-gray-200 px-4 py-4 outline-none focus:border-[#0B1F3A]" />
-              <button type="button" disabled={saving} onClick={saveDisplayName} className="mt-4 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white">Save profile</button>
+              <input
+                value={displayNameDraft}
+                onChange={(e) => setDisplayNameDraft(e.target.value)}
+                className="mt-2 w-full rounded-2xl border border-gray-200 px-4 py-4 outline-none focus:border-[#0B1F3A] transition"
+              />
+              <button
+                type="button"
+                disabled={saving}
+                onClick={saveDisplayName}
+                className="mt-4 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white transition active:scale-95 active:bg-[#162d52] disabled:opacity-60"
+              >
+                Save profile
+              </button>
               {profileMessage ? <p className="mt-3 text-center text-sm text-gray-600">{profileMessage}</p> : null}
             </div>
           </div>
@@ -696,18 +745,18 @@ export default function DashboardPage() {
               {incomingCall.status === "calling" ? (
                 <div className="flex justify-center gap-8">
                   <button type="button" onClick={answerCall} className="flex flex-col items-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-600 text-xl shadow-lg">📞</div>
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-600 text-xl shadow-lg transition active:scale-95">📞</div>
                     <span className="mt-2 text-xs">Answer</span>
                   </button>
                   <button type="button" onClick={declineCall} className="flex flex-col items-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg">✖</div>
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg transition active:scale-95">✖</div>
                     <span className="mt-2 text-xs">Decline</span>
                   </button>
                 </div>
               ) : (
                 <div className="flex justify-center">
                   <button type="button" onClick={endCall} className="flex flex-col items-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg">🔴</div>
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-xl shadow-lg transition active:scale-95">🔴</div>
                     <span className="mt-2 text-xs">End Call</span>
                   </button>
                 </div>
@@ -722,7 +771,13 @@ export default function DashboardPage() {
           <div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center text-black shadow-2xl">
             <h2 className="text-2xl font-bold">{incomingCall.status === "declined" ? "Call declined" : "Call ended"}</h2>
             <p className="mt-3 text-sm text-gray-500">The call is no longer active.</p>
-            <button type="button" onClick={clearCall} className="mt-6 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white">Clear</button>
+            <button
+              type="button"
+              onClick={clearCall}
+              className="mt-6 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white transition active:scale-95 active:bg-[#162d52]"
+            >
+              Clear
+            </button>
           </div>
         </div>
       ) : null}
