@@ -41,6 +41,13 @@ export default function LoginPage() {
 
     checkSession();
 
+    // Pre-fill invite code if coming from invite link
+const urlParams = new URLSearchParams(window.location.search);
+const inviteToken = urlParams.get("invite");
+if (inviteToken) {
+  sessionStorage.setItem("pendingInvite", inviteToken);
+}
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === "SIGNED_IN" && session?.user) {
