@@ -31,8 +31,9 @@ export default function SettingsPage() {
 
       setEmail(user.email || "");
 
-      const providers = user.app_metadata?.providers || [];
-      setIsGoogleUser(providers.includes("google") && !providers.includes("email"));
+      const { data: { session } } = await supabase.auth.getSession();
+const provider = session?.user?.app_metadata?.provider || "";
+setIsGoogleUser(provider === "google");
 
       const { data: profile } = await supabase
         .from("profiles").select("role").eq("id", user.id).maybeSingle();
