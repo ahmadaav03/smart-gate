@@ -46,10 +46,19 @@ export default function OnboardingPage() {
 
       if (profileError) throw profileError;
 
-      const slug =
-        propertyName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") +
-        "-" +
-        Date.now();
+      // Generate unique 6 digit number, check it doesn't already exist
+let slug = "";
+let isUnique = false;
+
+while (!isUnique) {
+  slug = Math.floor(100000 + Math.random() * 900000).toString();
+  const { data: existing } = await supabase
+    .from("sites")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (!existing) isUnique = true;
+}
 
       const { data: site, error: siteError } = await supabase
         .from("sites")

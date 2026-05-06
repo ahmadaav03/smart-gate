@@ -82,7 +82,7 @@ export default function PropertyPage() {
   async function addUnit() {
     if (!site || !newUnitName.trim()) return;
     setSaving(true);
-    const slug = newUnitName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") + "-" + Date.now();
+    const slug = newUnitName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
     const { data, error } = await supabase
       .from("units")
       .insert({
