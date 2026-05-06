@@ -4,19 +4,21 @@ import type { NextRequest } from "next/server";
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Check for any Supabase auth cookie
+  // Log all cookies to see what Supabase actually sets
   const cookies = request.cookies.getAll();
+  console.log("MIDDLEWARE COOKIES:", cookies.map(c => c.name));
+
   const hasSession = cookies.some(
     (cookie) =>
       cookie.name.startsWith("sb-") && cookie.name.endsWith("-auth-token")
   );
 
-  // Protected routes — must be logged in
+  console.log("HAS SESSION:", hasSession, "PATH:", pathname);
+
   const isProtected =
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/onboarding");
 
-  // Auth routes — redirect to dashboard if already logged in
   const isAuthRoute = pathname === "/resident/login";
 
   if (isProtected && !hasSession) {
