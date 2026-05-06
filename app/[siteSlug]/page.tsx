@@ -7,6 +7,8 @@ type Site = {
   id: string;
   name: string;
   slug: string;
+  subscription_status: string;
+  trial_ends_at: string;
 };
 
 type Unit = {
@@ -27,12 +29,13 @@ export default function SitePage({
   const [units, setUnits] = useState<Unit[]>([]);
   const [unitInput, setUnitInput] = useState("");
   const [error, setError] = useState("");
+  const [inactive, setInactive] = useState(false);
 
   useEffect(() => {
     async function loadSiteAndUnits() {
       const { data: siteData } = await supabase
         .from("sites")
-        .select("id, name, slug")
+        .select("id, name, slug, subscription_status, trial_ends_at")
         .eq("slug", siteSlug)
         .maybeSingle();
 
@@ -43,20 +46,40 @@ export default function SitePage({
 
       setSite(siteData as Site);
 
+      // Check subscription status
+      const status = siteData.subscription_status;
+      const trialEnds = new Date(siteData.trial_ends_at);
+      const now = new Date();
+
+      if (status === "expired" || status === "cancelled") {
+        setInactive(true);
+        return;
+      }
+
+      if (status === "trialing" && trialEnds < now) {
+        // Trial has expired — mark it in DB and show inactive
+        await supabase
+          .from("sites")
+          .update({ subscription_status: "expired" })
+          .eq("id", siteData.id);
+        setInactive(true);
+        return;
+      }
+
       const { data: unitsData } = await supabase
-  .from("units")
-  .select("id, name, display_name, slug")
-  .eq("site_id", siteData.id)
-  .order("name", { ascending: true });
+        .from("units")
+        .select("id, name, display_name, slug")
+        .eq("site_id", siteData.id)
+        .order("name", { ascending: true });
 
-const unitList = (unitsData as Unit[]) || [];
+      const unitList = (unitsData as Unit[]) || [];
 
-if (unitList.length === 1) {
-  window.location.href = `/${siteSlug}/u/${unitList[0].slug}`;
-  return;
-}
+      if (unitList.length === 1) {
+        window.location.href = `/${siteSlug}/u/${unitList[0].slug}`;
+        return;
+      }
 
-setUnits(unitList);
+      setUnits(unitList);
     }
 
     loadSiteAndUnits();
@@ -76,7 +99,6 @@ setUnits(unitList);
 
     const matchedUnit = units.find((unit) => {
       const displayName = getUnitDisplayName(unit).toLowerCase();
-
       return (
         unit.slug.toLowerCase() === cleaned ||
         unit.name.toLowerCase() === cleaned ||
@@ -92,9 +114,26 @@ setUnits(unitList);
     window.location.href = `/${siteSlug}/u/${matchedUnit.slug}`;
   }
 
+  // Inactive / expired screen
+  if (inactive) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0B1F3A] px-6 text-center text-white">
+        <div>
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-white/10 text-3xl">
+            🔒
+          </div>
+          <h1 className="text-2xl font-bold">Intercom Inactive</h1>
+          <p className="mt-3 text-white/70 max-w-xs mx-auto">
+            This intercom system is currently inactive. Please contact the property owner.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (error && !site) {
     return (
-      <div className="min-h-screen bg-[#0B1F3A] text-white flex items-center justify-center px-6 text-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#0B1F3A] px-6 text-center text-white">
         <div>
           <h1 className="text-2xl font-bold">Site not found</h1>
           <p className="mt-3 text-white/70">{error}</p>
@@ -110,9 +149,7 @@ setUnits(unitList);
           <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-white/10 text-3xl">
             🛡️
           </div>
-
           <h1 className="text-3xl font-bold">{site?.name || "Loading..."}</h1>
-
           <p className="mt-3 text-sm text-white/70">
             Enter or select the unit you want to contact.
           </p>
@@ -122,7 +159,6 @@ setUnits(unitList);
           <label className="text-sm font-semibold text-gray-700">
             Unit name or number
           </label>
-
           <input
             value={unitInput}
             onChange={(e) => {
@@ -130,11 +166,9 @@ setUnits(unitList);
               setError("");
             }}
             placeholder="e.g. 12, A4, or Deer Residence"
-            className="mt-2 w-full rounded-2xl border border-gray-200 px-4 py-4 text-lg outline-none focus:border-[#0B1F3A]"
+            className="mt-2 w-full rounded-2xl border border-gray-200 px-4 py-4 text-lg outline-none focus:border-[#0B1F3A] placeholder:text-gray-400"
           />
-
           {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
-
           <button
             type="button"
             onClick={goToUnit}
@@ -148,7 +182,6 @@ setUnits(unitList);
           <p className="mb-3 text-sm font-semibold text-white/80">
             Available units
           </p>
-
           <div className="grid grid-cols-2 gap-3">
             {units.map((unit) => (
               <button
@@ -168,9 +201,8 @@ setUnits(unitList);
               </button>
             ))}
           </div>
-
           {units.length === 0 ? (
-            <p className="mt-4 text-sm text-white/60 text-center">
+            <p className="mt-4 text-center text-sm text-white/60">
               No units found for this site.
             </p>
           ) : null}
