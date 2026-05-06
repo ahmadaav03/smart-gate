@@ -26,11 +26,22 @@ export default function PropertyPage() {
   const [message, setMessage] = useState("");
   const [addingUnit, setAddingUnit] = useState(false);
   const [newUnitName, setNewUnitName] = useState("");
+  const [hasResidentProfile, setHasResidentProfile] = useState(false);
+  const [addingSelf, setAddingSelf] = useState(false);
+  const [selfDisplayName, setSelfDisplayName] = useState("");
+  const [selfUnitId, setSelfUnitId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userFullName, setUserFullName] = useState<string>("");
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { window.location.href = "/resident/login"; return; }
+
+      setUserId(user.id);
+      const fullName = user.user_metadata?.full_name || user.email?.split("@")[0] || "Resident";
+      setUserFullName(fullName);
+      setSelfDisplayName(fullName);
 
       const { data: profile } = await supabase
         .from("profiles").select("role").eq("id", user.id).maybeSingle();
@@ -57,6 +68,13 @@ export default function PropertyPage() {
         .order("created_at", { ascending: true });
 
       setUnits((unitsData as Unit[]) || []);
+
+      // Check if admin already has a resident profile
+      const { data: existingResident } = await supabase
+        .from("residents").select("id")
+        .eq("auth_user_id", user.id).maybeSingle();
+
+      setHasResidentProfile(!!existingResident);
       setLoading(false);
     }
 
@@ -82,7 +100,11 @@ export default function PropertyPage() {
   async function addUnit() {
     if (!site || !newUnitName.trim()) return;
     setSaving(true);
-    const slug = newUnitName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const slug = newUnitName
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "");
+
     const { data, error } = await supabase
       .from("units")
       .insert({
@@ -92,11 +114,56 @@ export default function PropertyPage() {
         slug,
       })
       .select().single();
+
     if (!error && data) {
       setUnits([...units, data as Unit]);
       setNewUnitName("");
       setAddingUnit(false);
     }
+    setSaving(false);
+  }
+
+  async function addSelfAsResident() {
+    if (!userId || !selfUnitId || !selfDisplayName.trim()) {
+      setMessage("Please fill in all fields and select a unit.");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+
+    try {
+      const slug =
+        selfDisplayName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") +
+        "-" + Date.now();
+
+      const { data: resident, error: residentError } = await supabase
+        .from("residents")
+        .insert({
+          full_name: userFullName,
+          display_name: selfDisplayName.trim(),
+          slug,
+          auth_user_id: userId,
+          availability_status: "available",
+          ringtone: "classic",
+        })
+        .select().single();
+
+      if (residentError) throw residentError;
+
+      await supabase.from("unit_residents").insert({
+        unit_id: selfUnitId,
+        resident_id: resident.id,
+      });
+
+      setHasResidentProfile(true);
+      setAddingSelf(false);
+      setMessage("You have been added as a resident successfully.");
+    } catch (err: any) {
+      setMessage("Something went wrong. Please try again.");
+      console.log(err);
+    }
+
     setSaving(false);
   }
 
@@ -115,7 +182,6 @@ export default function PropertyPage() {
     <div className="min-h-screen bg-[#0B1F3A] px-5 py-8 text-white">
       <div className="mx-auto max-w-md">
 
-        {/* Back */}
         <button
           type="button"
           onClick={() => window.location.href = "/dashboard"}
@@ -151,13 +217,13 @@ export default function PropertyPage() {
               <input
                 value={nameDraft}
                 onChange={(e) => setNameDraft(e.target.value)}
-                className="w-full rounded-2xl border border-gray-200 px-4 py-4 text-sm outline-none focus:border-[#0B1F3A]"
+                className="w-full rounded-2xl border border-gray-200 px-4 py-4 text-sm outline-none focus:border-[#0B1F3A] placeholder:text-gray-400"
               />
               <button
                 type="button"
                 disabled={saving}
                 onClick={savePropertyName}
-                className="w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white transition active:scale-95 active:bg-[#162d52] disabled:opacity-60"
+                className="w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white transition active:scale-95 disabled:opacity-60"
               >
                 {saving ? "Saving..." : "Save name"}
               </button>
@@ -191,7 +257,7 @@ export default function PropertyPage() {
                 value={newUnitName}
                 onChange={(e) => setNewUnitName(e.target.value)}
                 placeholder="e.g. Unit 1, Flat A, Main House"
-                className="w-full rounded-2xl border border-gray-200 px-4 py-4 text-sm outline-none focus:border-[#0B1F3A]"
+                className="w-full rounded-2xl border border-gray-200 px-4 py-4 text-sm outline-none focus:border-[#0B1F3A] placeholder:text-gray-400"
               />
               <button
                 type="button"
@@ -223,6 +289,96 @@ export default function PropertyPage() {
             </div>
           ) : null}
         </div>
+
+        {/* Add self as resident — only if no resident profile yet */}
+        {!hasResidentProfile ? (
+          <div className="mt-5 rounded-3xl bg-white p-5 text-black shadow-2xl">
+            <p className="font-bold">Add yourself as a resident</p>
+            <p className="mt-1 text-sm text-gray-500">
+              Add yourself so you can receive visitor calls at this property.
+            </p>
+
+            {!addingSelf ? (
+              <button
+                type="button"
+                onClick={() => setAddingSelf(true)}
+                className="mt-4 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white transition active:scale-95 active:bg-[#162d52]"
+              >
+                Add me as a resident
+              </button>
+            ) : (
+              <div className="mt-4 flex flex-col gap-4">
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">
+                    Your display name
+                  </label>
+                  <p className="mt-0.5 text-xs text-gray-400">
+                    This is what visitors will see when calling you
+                  </p>
+                  <input
+                    value={selfDisplayName}
+                    onChange={(e) => setSelfDisplayName(e.target.value)}
+                    placeholder="e.g. Ahmad, Mr Smith"
+                    className="mt-2 w-full rounded-2xl border border-gray-200 px-4 py-4 text-sm outline-none focus:border-[#0B1F3A] placeholder:text-gray-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">
+                    Which unit do you live in?
+                  </label>
+                  <div className="mt-2 flex flex-col gap-2">
+                    {units.map((unit) => (
+                      <button
+                        key={unit.id}
+                        type="button"
+                        onClick={() => setSelfUnitId(unit.id)}
+                        className={`rounded-2xl border-2 px-4 py-3 text-left text-sm font-semibold transition active:scale-95 ${
+                          selfUnitId === unit.id
+                            ? "border-[#0B1F3A] bg-[#0B1F3A] text-white"
+                            : "border-gray-200 text-gray-700"
+                        }`}
+                      >
+                        {unit.display_name || unit.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={saving || !selfUnitId || !selfDisplayName.trim()}
+                  onClick={addSelfAsResident}
+                  className="w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white transition active:scale-95 disabled:opacity-60"
+                >
+                  {saving ? "Adding..." : "Confirm"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setAddingSelf(false); setMessage(""); }}
+                  className="w-full rounded-full border border-gray-200 py-4 text-sm font-semibold text-gray-600 transition active:scale-95"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-5 rounded-3xl bg-white p-5 text-black shadow-2xl">
+            <p className="font-bold">Your resident profile</p>
+            <p className="mt-1 text-sm text-gray-500">
+              You are set up as a resident at this property and can receive visitor calls.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.href = "/dashboard"}
+              className="mt-4 w-full rounded-full bg-gray-100 py-4 text-sm font-semibold text-gray-700 transition active:scale-95"
+            >
+              Go to your dashboard
+            </button>
+          </div>
+        )}
 
       </div>
     </div>
