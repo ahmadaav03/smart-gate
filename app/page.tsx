@@ -53,7 +53,7 @@ export default function HomePage() {
           </div>
 
           <p className="mt-4 text-center text-xs text-white/40">
-            40 days free · No installation · Cancel anytime
+            40 days free  · No installation · Cancel anytime
           </p>
 
           {/* How it works */}
