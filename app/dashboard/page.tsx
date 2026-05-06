@@ -241,6 +241,7 @@ export default function DashboardPage() {
     async function loadLatestCall() {
       const { data } = await supabase
         .from("calls").select("*").eq("resident_id", residentId)
+        .in("status", ["calling", "answered"])
         .order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (!active) return;
       const call = (data as Call) || null;
