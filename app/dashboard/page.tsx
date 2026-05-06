@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -474,7 +475,7 @@ export default function DashboardPage() {
             </button>
             <button
               type="button"
-              onClick={() => resident ? setProfileOpen(true) : null}
+              onClick={() => setProfileOpen(true)}
               className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-white/10 text-xl active:scale-95 transition"
             >
               {resident?.avatar_url ? (
@@ -564,7 +565,10 @@ export default function DashboardPage() {
                     : `${callHistory.length} call${callHistory.length === 1 ? "" : "s"}`}
                 </p>
               </div>
-              <span className="text-gray-400 text-lg transition-transform duration-200" style={{ transform: historyExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
+              <span
+                className="text-gray-400 text-lg transition-transform duration-200"
+                style={{ transform: historyExpanded ? "rotate(180deg)" : "rotate(0deg)" }}
+              >
                 ↓
               </span>
             </button>
@@ -595,7 +599,7 @@ export default function DashboardPage() {
                     );
                   })
                 )}
-                {callHistory.length > 3 && !historyExpanded && (
+                {callHistory.length > 3 && historyExpanded && visibleHistory.length < callHistory.length && (
                   <button
                     type="button"
                     onClick={() => setHistoryExpanded(true)}
@@ -620,7 +624,7 @@ export default function DashboardPage() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => window.location.href = `/dashboard/qr`}
+                  onClick={() => window.location.href = "/dashboard/qr"}
                   className="mt-3 rounded-full bg-[#0B1F3A] px-5 py-2 text-sm font-semibold text-white transition active:scale-95 active:bg-[#162d52]"
                 >
                   View QR code
@@ -633,10 +637,21 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
+        {/* Add another property — subtle, admin only */}
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={() => window.location.href = "/dashboard/new-property"}
+            className="mt-6 w-full text-center text-xs text-white/40 transition hover:text-white/60 active:scale-95"
+          >
+            + Add another property
+          </button>
+        ) : null}
+
       </div>
 
       {/* Profile modal */}
-      {profileOpen && resident ? (
+      {profileOpen ? (
         <div className="fixed inset-0 z-40 bg-black/60 px-5 py-8">
           <div className="mx-auto max-w-md rounded-3xl bg-white p-5 text-black shadow-2xl">
             <div className="flex items-center justify-between">
@@ -649,32 +664,50 @@ export default function DashboardPage() {
                 Close
               </button>
             </div>
-            <div className="mt-5 flex items-center gap-4">
-              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-gray-100 text-3xl">
-                {resident.avatar_url ? <img src={resident.avatar_url} alt="Profile" className="h-full w-full object-cover" /> : "👤"}
+
+            {resident ? (
+              <>
+                <div className="mt-5 flex items-center gap-4">
+                  <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-gray-100 text-3xl">
+                    {resident.avatar_url ? <img src={resident.avatar_url} alt="Profile" className="h-full w-full object-cover" /> : "👤"}
+                  </div>
+                  <label className="rounded-full bg-[#0B1F3A] px-5 py-3 text-sm font-semibold text-white transition active:scale-95 active:bg-[#162d52]">
+                    Change photo
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAvatar(f); }} />
+                  </label>
+                </div>
+                <div className="mt-5">
+                  <label className="text-sm font-semibold text-gray-700">Display name visitors see</label>
+                  <input
+                    value={displayNameDraft}
+                    onChange={(e) => setDisplayNameDraft(e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-gray-200 px-4 py-4 outline-none focus:border-[#0B1F3A] transition placeholder:text-gray-400"
+                  />
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={saveDisplayName}
+                    className="mt-4 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white transition active:scale-95 active:bg-[#162d52] disabled:opacity-60"
+                  >
+                    Save profile
+                  </button>
+                  {profileMessage ? <p className="mt-3 text-center text-sm text-gray-600">{profileMessage}</p> : null}
+                </div>
+              </>
+            ) : (
+              <div className="mt-5">
+                <p className="text-sm text-gray-500">
+                  You don't have a resident profile yet. To receive visitor calls, add yourself as a resident from your property management page.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setProfileOpen(false); window.location.href = "/dashboard/property"; }}
+                  className="mt-4 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white transition active:scale-95"
+                >
+                  Go to property management
+                </button>
               </div>
-              <label className="rounded-full bg-[#0B1F3A] px-5 py-3 text-sm font-semibold text-white transition active:scale-95 active:bg-[#162d52]">
-                Change photo
-                <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAvatar(f); }} />
-              </label>
-            </div>
-            <div className="mt-5">
-              <label className="text-sm font-semibold text-gray-700">Display name visitors see</label>
-              <input
-                value={displayNameDraft}
-                onChange={(e) => setDisplayNameDraft(e.target.value)}
-                className="mt-2 w-full rounded-2xl border border-gray-200 px-4 py-4 outline-none focus:border-[#0B1F3A] transition"
-              />
-              <button
-                type="button"
-                disabled={saving}
-                onClick={saveDisplayName}
-                className="mt-4 w-full rounded-full bg-[#0B1F3A] py-4 font-semibold text-white transition active:scale-95 active:bg-[#162d52] disabled:opacity-60"
-              >
-                Save profile
-              </button>
-              {profileMessage ? <p className="mt-3 text-center text-sm text-gray-600">{profileMessage}</p> : null}
-            </div>
+            )}
           </div>
         </div>
       ) : null}

@@ -3,6 +3,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
+type SiteItem = {
+  id: string;
+  name: string;
+  subscription_status: string;
+};
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -14,7 +20,7 @@ export default function SettingsPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
-  const [site, setSite] = useState<{ id: string; name: string } | null>(null);
+  const [sites, setSites] = useState<SiteItem[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
@@ -32,11 +38,12 @@ export default function SettingsPage() {
 
       if (profile?.role === "property_admin") {
         setIsAdmin(true);
-        const { data: siteData } = await supabase
-          .from("sites").select("id, name")
+        const { data: sitesData } = await supabase
+          .from("sites")
+          .select("id, name, subscription_status")
           .eq("owner_id", user.id)
-          .limit(1).maybeSingle();
-        if (siteData) setSite(siteData);
+          .order("created_at", { ascending: true });
+        setSites((sitesData as SiteItem[]) || []);
       }
 
       setLoading(false);
@@ -57,12 +64,9 @@ export default function SettingsPage() {
       setPasswordMessage("Password must be at least 6 characters.");
       return;
     }
-
     setSaving(true);
     setPasswordMessage("");
-
     const { error } = await supabase.auth.updateUser({ password: newPassword });
-
     if (error) {
       setPasswordMessage("Could not update password. Please try again.");
     } else {
@@ -70,7 +74,6 @@ export default function SettingsPage() {
       setNewPassword("");
       setConfirmPassword("");
     }
-
     setSaving(false);
   }
 
@@ -82,7 +85,6 @@ export default function SettingsPage() {
     if (!user) return;
 
     try {
-      // Delete resident record
       const { data: resident } = await supabase
         .from("residents").select("id").eq("auth_user_id", user.id).maybeSingle();
 
@@ -92,27 +94,27 @@ export default function SettingsPage() {
         await supabase.from("residents").delete().eq("id", resident.id);
       }
 
-      // If admin, delete property and everything under it
-      if (isAdmin && site) {
-        const { data: units } = await supabase
-          .from("units").select("id").eq("site_id", site.id);
+      if (isAdmin && sites.length > 0) {
+        for (const s of sites) {
+          const { data: units } = await supabase
+            .from("units").select("id").eq("site_id", s.id);
 
-        if (units) {
-          for (const unit of units) {
-            await supabase.from("unit_residents").delete().eq("unit_id", unit.id);
-            await supabase.from("invites").delete().eq("unit_id", unit.id);
+          if (units) {
+            for (const unit of units) {
+              await supabase.from("unit_residents").delete().eq("unit_id", unit.id);
+              await supabase.from("invites").delete().eq("unit_id", unit.id);
+            }
           }
-        }
 
-        await supabase.from("units").delete().eq("site_id", site.id);
-        await supabase.from("calls").delete().eq("site_id", site.id);
-        await supabase.from("sites").delete().eq("id", site.id);
+          await supabase.from("units").delete().eq("site_id", s.id);
+          await supabase.from("calls").delete().eq("site_id", s.id);
+          await supabase.from("sites").delete().eq("id", s.id);
+        }
       }
 
       await supabase.from("profiles").delete().eq("id", user.id);
       await supabase.auth.signOut();
       window.location.href = "/resident/login";
-
     } catch (err) {
       console.log(err);
       setDeleting(false);
@@ -165,19 +167,44 @@ export default function SettingsPage() {
           ) : null}
         </div>
 
-        {/* Subscription — admin only */}
-        {isAdmin && site ? (
+        {/* Properties & Subscription — admin only */}
+        {isAdmin ? (
           <div className="mt-5 rounded-3xl bg-white p-5 text-black shadow-2xl">
-            <p className="font-bold">Subscription</p>
+            <p className="font-bold">My Properties</p>
             <p className="mt-1 text-sm text-gray-500">
-              Manage your SmartGate subscription for {site.name}.
+              R69/month for first property · R49/month for each additional property.
             </p>
-            <div className="mt-4 rounded-2xl bg-gray-50 px-4 py-3">
-              <p className="text-xs text-gray-400">Current plan</p>
-              <p className="mt-1 text-sm font-semibold">Free trial</p>
+
+            <div className="mt-4 flex flex-col gap-3">
+              {sites.map((s, index) => (
+                <div key={s.id} className="flex items-center justify-between rounded-2xl bg-gray-50 p-4">
+                  <div>
+                    <p className="text-sm font-semibold">{s.name}</p>
+                    <p className="mt-0.5 text-xs text-gray-400">
+                      {index === 0 ? "R69/month" : "R49/month"}
+                    </p>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    s.subscription_status === "active" ? "bg-green-100 text-green-700"
+                    : s.subscription_status === "trialing" ? "bg-blue-100 text-blue-700"
+                    : "bg-red-100 text-red-700"
+                  }`}>
+                    {s.subscription_status === "trialing" ? "Trial" : s.subscription_status}
+                  </span>
+                </div>
+              ))}
             </div>
-            <p className="mt-3 text-xs text-gray-400">
-              Subscription management and billing will be available soon.
+
+            <button
+              type="button"
+              onClick={() => window.location.href = "/dashboard/new-property"}
+              className="mt-4 w-full rounded-full border border-gray-200 py-3 text-sm font-semibold text-gray-700 transition active:scale-95 active:bg-gray-50"
+            >
+              + Add another property
+            </button>
+
+            <p className="mt-4 text-xs text-gray-400">
+              Subscription billing coming soon. Your trial covers all properties.
             </p>
           </div>
         ) : null}
@@ -192,14 +219,14 @@ export default function SettingsPage() {
                 placeholder="New password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full rounded-2xl border border-gray-200 px-4 py-4 text-sm outline-none focus:border-[#0B1F3A]"
+                className="w-full rounded-2xl border border-gray-200 px-4 py-4 text-sm outline-none focus:border-[#0B1F3A] placeholder:text-gray-400"
               />
               <input
                 type="password"
                 placeholder="Confirm new password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-2xl border border-gray-200 px-4 py-4 text-sm outline-none focus:border-[#0B1F3A]"
+                className="w-full rounded-2xl border border-gray-200 px-4 py-4 text-sm outline-none focus:border-[#0B1F3A] placeholder:text-gray-400"
               />
               {passwordMessage ? (
                 <p className={`text-sm ${passwordMessage.includes("success") ? "text-green-600" : "text-red-600"}`}>
@@ -232,7 +259,7 @@ export default function SettingsPage() {
           <p className="font-bold text-red-600">Delete account</p>
           <p className="mt-1 text-sm text-gray-500">
             {isAdmin
-              ? "This will permanently delete your account, property, all units, all residents and all call history. This cannot be undone."
+              ? "This will permanently delete your account, all properties, all units, all residents and all call history. This cannot be undone."
               : "This will permanently delete your account and all associated data. This cannot be undone."}
           </p>
 
@@ -246,14 +273,12 @@ export default function SettingsPage() {
             </button>
           ) : (
             <div className="mt-4 flex flex-col gap-3">
-              <p className="text-sm font-semibold text-red-600">
-                Type DELETE to confirm
-              </p>
+              <p className="text-sm font-semibold text-red-600">Type DELETE to confirm</p>
               <input
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder="DELETE"
-                className="w-full rounded-2xl border-2 border-red-200 px-4 py-4 text-sm outline-none focus:border-red-500"
+                className="w-full rounded-2xl border-2 border-red-200 px-4 py-4 text-sm outline-none focus:border-red-500 placeholder:text-gray-400"
               />
               <button
                 type="button"
