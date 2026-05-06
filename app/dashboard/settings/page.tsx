@@ -22,6 +22,7 @@ export default function SettingsPage() {
   const [deleting, setDeleting] = useState(false);
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [trialEndsAt, setTrialEndsAt] = useState<string>("");
 
   useEffect(() => {
     async function load() {
@@ -44,6 +45,13 @@ export default function SettingsPage() {
           .eq("owner_id", user.id)
           .order("created_at", { ascending: true });
         setSites((sitesData as SiteItem[]) || []);
+        // Get trial end date from profiles
+        const { data: profileData } = await supabase
+          .from("profiles")
+          .select("trial_ends_at")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (profileData?.trial_ends_at) setTrialEndsAt(profileData.trial_ends_at);
       }
 
       setLoading(false);
@@ -177,20 +185,31 @@ export default function SettingsPage() {
 
             <div className="mt-4 flex flex-col gap-3">
               {sites.map((s, index) => (
-                <div key={s.id} className="flex items-center justify-between rounded-2xl bg-gray-50 p-4">
-                  <div>
-                    <p className="text-sm font-semibold">{s.name}</p>
-                    <p className="mt-0.5 text-xs text-gray-400">
-                      {index === 0 ? "R69/month" : "R49/month"}
-                    </p>
+                <div key={s.id} className="rounded-2xl bg-gray-50 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold">{s.name}</p>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        {index === 0 ? "R69/month" : "R49/month"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        s.subscription_status === "active" ? "bg-green-100 text-green-700"
+                        : s.subscription_status === "trialing" ? "bg-blue-100 text-blue-700"
+                        : "bg-red-100 text-red-700"
+                      }`}>
+                        {s.subscription_status === "trialing" ? "Trial" : s.subscription_status}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => window.location.href = "/dashboard/property"}
+                        className="rounded-full bg-[#0B1F3A] px-3 py-1 text-xs font-semibold text-white transition active:scale-95"
+                      >
+                        Manage
+                      </button>
+                    </div>
                   </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    s.subscription_status === "active" ? "bg-green-100 text-green-700"
-                    : s.subscription_status === "trialing" ? "bg-blue-100 text-blue-700"
-                    : "bg-red-100 text-red-700"
-                  }`}>
-                    {s.subscription_status === "trialing" ? "Trial" : s.subscription_status}
-                  </span>
                 </div>
               ))}
             </div>
@@ -204,7 +223,11 @@ export default function SettingsPage() {
             </button>
 
             <p className="mt-4 text-xs text-gray-400">
-              Subscription billing coming soon. Your trial covers all properties.
+              {sites[0]?.subscription_status === "trialing"
+                ? `Subscription status: Trial · ends ${new Date(trialEndsAt).toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" })}`
+                : sites[0]?.subscription_status === "active"
+                ? "Subscription status: Active"
+                : "Subscription status: Expired"}
             </p>
           </div>
         ) : null}
