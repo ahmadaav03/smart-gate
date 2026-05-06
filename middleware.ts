@@ -1,40 +1,15 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
-  });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          response = NextResponse.next({
-            request,
-          });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  const { data: { user } } = await supabase.auth.getUser();
-
   const { pathname } = request.nextUrl;
+
+  // Check for any Supabase auth cookie
+  const cookies = request.cookies.getAll();
+  const hasSession = cookies.some(
+    (cookie) =>
+      cookie.name.startsWith("sb-") && cookie.name.endsWith("-auth-token")
+  );
 
   // Protected routes — must be logged in
   const isProtected =
@@ -44,15 +19,15 @@ export async function middleware(request: NextRequest) {
   // Auth routes — redirect to dashboard if already logged in
   const isAuthRoute = pathname === "/resident/login";
 
-  if (isProtected && !user) {
+  if (isProtected && !hasSession) {
     return NextResponse.redirect(new URL("/resident/login", request.url));
   }
 
-  if (isAuthRoute && user) {
+  if (isAuthRoute && hasSession) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {
