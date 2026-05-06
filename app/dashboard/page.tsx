@@ -77,16 +77,22 @@ const ringtones = [
 
 function formatCallTime(dateStr: string) {
   const date = new Date(dateStr);
-  const now = new Date();
-  const isToday = date.toDateString() === now.toDateString();
-  const yesterday = new Date(now);
+  
+  const nowInSA = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Johannesburg" }));
+  const dateInSA = new Date(date.toLocaleString("en-US", { timeZone: "Africa/Johannesburg" }));
+
+  const isToday = dateInSA.toDateString() === nowInSA.toDateString();
+  const yesterday = new Date(nowInSA);
   yesterday.setDate(yesterday.getDate() - 1);
-  const isYesterday = date.toDateString() === yesterday.toDateString();
+  const isYesterday = dateInSA.toDateString() === yesterday.toDateString();
+
   const timeStr = date.toLocaleTimeString("en-ZA", {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
     timeZone: "Africa/Johannesburg",
   });
+
   if (isToday) return `Today at ${timeStr}`;
   if (isYesterday) return `Yesterday at ${timeStr}`;
   return date.toLocaleDateString("en-ZA", {
