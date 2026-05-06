@@ -82,10 +82,18 @@ function formatCallTime(dateStr: string) {
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   const isYesterday = date.toDateString() === yesterday.toDateString();
-  const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const timeStr = date.toLocaleTimeString("en-ZA", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Africa/Johannesburg",
+  });
   if (isToday) return `Today at ${timeStr}`;
   if (isYesterday) return `Yesterday at ${timeStr}`;
-  return date.toLocaleDateString([], { day: "numeric", month: "short" }) + " at " + timeStr;
+  return date.toLocaleDateString("en-ZA", {
+    day: "numeric",
+    month: "short",
+    timeZone: "Africa/Johannesburg",
+  }) + " at " + timeStr;
 }
 
 function getStatusLabel(status: string) {
@@ -163,6 +171,7 @@ export default function DashboardPage() {
       .select(`
         id,
         status,
+        was_answered,
         created_at,
         media_mode,
         sites ( name ),
@@ -177,7 +186,7 @@ export default function DashboardPage() {
 
     const enriched = data.map((call: any) => ({
       id: call.id,
-      status: call.status,
+      status: call.status === "cancelled" && call.was_answered ? "answered" : call.status,
       created_at: call.created_at,
       media_mode: call.media_mode,
       site_name: call.sites?.name || null,
@@ -259,6 +268,10 @@ export default function DashboardPage() {
           if (payload.eventType === "DELETE") { setIncomingCall(null); setAudioError(""); setSiteName(""); setUnitName(""); stopPeer(); return; }
           const row = payload.new as Call;
           if (row.status === "answered" || row.status === "declined" || row.status === "cancelled") loadCallHistory(residentId);
+          if (row.status === "declined" || row.status === "cancelled") {
+            setIncomingCall((prev) => prev?.id === row.id ? row as Call : prev);
+            return;
+          }
           if (!row.visitor_ready) { setIncomingCall(null); return; }
           const { data: fullRow } = await supabase.from("calls").select("*").eq("id", row.id).maybeSingle();
           if (!fullRow) return;
@@ -393,13 +406,13 @@ export default function DashboardPage() {
   }
 
   async function answerCall() {
-    if (!incomingCall) return;
-    setAudioError("");
-    if (!localAudioTrackRef.current) { setAudioError("Microphone is not ready on this device."); return; }
-    localAudioTrackRef.current.enabled = true;
-    await supabase.from("calls").update({ status: "answered" }).eq("id", incomingCall.id);
-    if (remoteAudioRef.current) { remoteAudioRef.current.muted = false; await remoteAudioRef.current.play().catch(console.log); }
-  }
+  if (!incomingCall) return;
+  setAudioError("");
+  if (!localAudioTrackRef.current) { setAudioError("Microphone is not ready on this device."); return; }
+  localAudioTrackRef.current.enabled = true;
+  await supabase.from("calls").update({ status: "answered", was_answered: true }).eq("id", incomingCall.id);
+  if (remoteAudioRef.current) { remoteAudioRef.current.muted = false; await remoteAudioRef.current.play().catch(console.log); }
+}
 
   async function declineCall() {
     if (!incomingCall) return;
