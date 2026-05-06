@@ -76,30 +76,31 @@ const ringtones = [
 ];
 
 function formatCallTime(dateStr: string) {
+  // Manually offset UTC to SAST (UTC+2)
   const date = new Date(dateStr);
-  
-  const nowInSA = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Johannesburg" }));
-  const dateInSA = new Date(date.toLocaleString("en-US", { timeZone: "Africa/Johannesburg" }));
+  const sastOffset = 2 * 60 * 60 * 1000;
+  const sastDate = new Date(date.getTime() + sastOffset);
 
-  const isToday = dateInSA.toDateString() === nowInSA.toDateString();
-  const yesterday = new Date(nowInSA);
+  const now = new Date();
+  const sastNow = new Date(now.getTime() + sastOffset);
+
+  const isToday = sastDate.toDateString() === sastNow.toDateString();
+  const yesterday = new Date(sastNow);
   yesterday.setDate(yesterday.getDate() - 1);
-  const isYesterday = dateInSA.toDateString() === yesterday.toDateString();
+  const isYesterday = sastDate.toDateString() === yesterday.toDateString();
 
-  const timeStr = date.toLocaleTimeString("en-ZA", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Africa/Johannesburg",
-  });
+  const hours = sastDate.getUTCHours().toString().padStart(2, "0");
+  const minutes = sastDate.getUTCMinutes().toString().padStart(2, "0");
+  const timeStr = `${hours}:${minutes}`;
 
   if (isToday) return `Today at ${timeStr}`;
   if (isYesterday) return `Yesterday at ${timeStr}`;
-  return date.toLocaleDateString("en-ZA", {
-    day: "numeric",
-    month: "short",
-    timeZone: "Africa/Johannesburg",
-  }) + " at " + timeStr;
+
+  const day = sastDate.getUTCDate();
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = monthNames[sastDate.getUTCMonth()];
+
+  return `${day} ${month} at ${timeStr}`;
 }
 
 function getStatusLabel(status: string) {
