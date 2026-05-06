@@ -48,6 +48,11 @@ if (inviteToken) {
   sessionStorage.setItem("pendingInvite", inviteToken);
 }
 
+const modeParam = urlParams.get("mode");
+if (modeParam === "signup") {
+  setMode("signup");
+}
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === "SIGNED_IN" && session?.user) {
