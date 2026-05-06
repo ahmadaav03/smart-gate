@@ -98,21 +98,21 @@ if (inviteToken) {
   }
 
   async function handleGoogleAuth() {
-    setLoading(true);
-    setError("");
+  setLoading(true);
+  setError("");
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+    },
+  });
 
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-    }
+  if (error) {
+    setError(error.message);
+    setLoading(false);
   }
+}
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0B1F3A] px-6">
