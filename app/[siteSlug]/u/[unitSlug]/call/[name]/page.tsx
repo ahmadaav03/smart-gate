@@ -311,7 +311,9 @@ const { iceServers } = await iceRes.json();
       setExpiresAt(timeoutAt);
 
       // Send push notification to resident
-      if (updatedCall?.resident_id) {
+console.log("updatedCall:", updatedCall);
+if (updatedCall?.resident_id) {
+  console.log("Sending push notification to:", updatedCall.resident_id);
         try {
           let siteNameStr = "";
           let unitNameStr = "";
