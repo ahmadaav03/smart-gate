@@ -334,7 +334,7 @@ if (updatedCall?.resident_id) {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    "Authorization": `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+    "Authorization": `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhyeGhxZnNzY3Fva2thdmxlZW15Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0OTkwMDgsImV4cCI6MjA5MTA3NTAwOH0.D-xtY_rf53dsdiBEvib6-Q5lU5o6PNyPGBtnvfdvaUg`,
   },
   body: JSON.stringify({
     call_id: callId,
