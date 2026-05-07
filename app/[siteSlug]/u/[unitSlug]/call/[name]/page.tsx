@@ -242,21 +242,14 @@ const { iceServers } = await iceRes.json();
 
       // Use statusRef here so we always read the current status, not a stale closure
       peer.ontrack = (event) => {
-        const [remoteStream] = event.streams;
-        if (!remoteStream || !remoteAudioRef.current) return;
+  const [remoteStream] = event.streams;
+  if (!remoteStream || !remoteAudioRef.current) return;
 
-        // Only set srcObject if it's not already the same stream
-        if (remoteAudioRef.current.srcObject !== remoteStream) {
-          remoteAudioRef.current.srcObject = remoteStream;
-        }
-
-        // Always start muted — the status effect below will unmute when answered
-        remoteAudioRef.current.muted = true;
-
-        remoteAudioRef.current.play().catch((err) => {
-          console.log("Visitor audio play failed:", err);
-        });
-      };
+  if (remoteAudioRef.current.srcObject !== remoteStream) {
+    remoteAudioRef.current.srcObject = remoteStream;
+    remoteAudioRef.current.muted = true;
+  }
+};
 
       peer.onicecandidate = async (event) => {
         if (!event.candidate || !callId) return;
