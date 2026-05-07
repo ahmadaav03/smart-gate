@@ -295,7 +295,7 @@ const { iceServers } = await iceRes.json();
 
       await new Promise((resolve) => setTimeout(resolve, 500));
 
-      const { error: callUpdateError } = await supabase
+      const { data: updatedCall, error: callUpdateError } = await supabase
         .from("calls")
         .update({
           offer,
@@ -304,7 +304,9 @@ const { iceServers } = await iceRes.json();
           status: "calling",
           visitor_ready: true,
         })
-        .eq("id", callId);
+        .eq("id", callId)
+        .select("resident_id, site_id, unit_id")
+        .single();
 
       if (callUpdateError) {
         console.log("Failed to save call setup:", callUpdateError);
@@ -314,6 +316,37 @@ const { iceServers } = await iceRes.json();
       }
 
       setExpiresAt(timeoutAt);
+
+      // Send push notification to resident
+      if (updatedCall?.resident_id) {
+        try {
+          let siteNameStr = "";
+          let unitNameStr = "";
+
+          if (updatedCall.site_id) {
+            const { data: siteData } = await supabase
+              .from("sites").select("name").eq("id", updatedCall.site_id).maybeSingle();
+            siteNameStr = siteData?.name || "";
+          }
+
+          if (updatedCall.unit_id) {
+            const { data: unitData } = await supabase
+              .from("units").select("name, display_name").eq("id", updatedCall.unit_id).maybeSingle();
+            unitNameStr = unitData?.display_name || unitData?.name || "";
+          }
+
+          await supabase.functions.invoke("notify-resident", {
+            body: {
+              call_id: callId,
+              resident_id: updatedCall.resident_id,
+              site_name: siteNameStr,
+              unit_name: unitNameStr,
+            },
+          });
+        } catch (err) {
+          console.log("Push notification failed:", err);
+        }
+      }
 
       clearCallTimeout();
       timeoutRef.current = setTimeout(() => {
