@@ -328,14 +328,19 @@ const { iceServers } = await iceRes.json();
             unitNameStr = unitData?.display_name || unitData?.name || "";
           }
 
-          await supabase.functions.invoke("notify-resident", {
-            body: {
-              call_id: callId,
-              resident_id: updatedCall.resident_id,
-              site_name: siteNameStr,
-              unit_name: unitNameStr,
-            },
-          });
+          await fetch(`https://xrxhqfsscqokkavleemy.supabase.co/functions/v1/notify-resident`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+  },
+  body: JSON.stringify({
+    call_id: callId,
+    resident_id: updatedCall.resident_id,
+    site_name: siteNameStr,
+    unit_name: unitNameStr,
+  }),
+});
         } catch (err) {
           console.log("Push notification failed:", err);
         }
