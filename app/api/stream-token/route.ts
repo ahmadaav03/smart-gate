@@ -1,5 +1,4 @@
 import { StreamClient } from "@stream-io/node-sdk";
-import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 const streamClient = new StreamClient(
