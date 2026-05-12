@@ -108,15 +108,22 @@ export default function UnitCallPage({
 
       await hydrateCallDetails(callRow.resident_id, callRow.site_id, callRow.unit_id);
 
-      // Get visitor's camera/mic
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // Get camera/mic and Stream token in parallel
+      const [stream, tokenRes] = await Promise.all([
+        navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        }),
+        fetch("/api/stream-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: `visitor_${callId}` }),
+        })
+      ]);
 
       localStreamRef.current = stream;
 
@@ -125,12 +132,6 @@ export default function UnitCallPage({
         await localVideoRef.current.play().catch(() => {});
       }
 
-      // Get Stream token for visitor (visitor uses callId as their user ID)
-      const tokenRes = await fetch("/api/stream-token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: `visitor_${callId}` }),
-      });
       const { token } = await tokenRes.json();
 
       // Create Stream client for visitor
